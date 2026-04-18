@@ -32,7 +32,7 @@ async function exportResults(searchId, format, filters) {
         const { data } = await dataService.getResults(searchId, { page: 1, limit: 99999, filters });
         if (!data.length) return { success: false, message: 'Sem dados para exportar' };
 
-        const exportsDir = path.join(__dirname, '../../exports');
+        const exportsDir = process.env.VERCEL ? '/tmp/exports' : path.join(__dirname, '../../exports');
         if (!fs.existsSync(exportsDir)) fs.mkdirSync(exportsDir, { recursive: true });
 
         const filename = `export_${searchId}_${Date.now()}.csv`;

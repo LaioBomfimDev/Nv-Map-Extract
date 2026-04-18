@@ -9,7 +9,7 @@ const dataService = require('../services/dataService');
 
 // Configurar multer para upload
 const upload = multer({
-    dest: path.join(__dirname, '../../temp/'),
+    dest: process.env.VERCEL ? '/tmp/' : path.join(__dirname, '../../temp/'),
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         const allowed = ['.csv', '.xlsx', '.xls'];

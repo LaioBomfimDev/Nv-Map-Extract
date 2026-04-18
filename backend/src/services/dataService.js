@@ -5,6 +5,7 @@ const logger = require('../utils/logger');
 let db = null;
 
 function getDbPath() {
+    if (process.env.VERCEL) return '/tmp/searches.db';
     const dbDir = path.join(__dirname, '../../../database');
     if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
     return path.join(dbDir, 'searches.db');

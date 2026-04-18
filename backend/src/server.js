@@ -91,7 +91,9 @@ app.post('/api/config', (req, res) => {
         const newConfig = req.body;
         const configPath = path.join(__dirname, '../config/company-config.json');
         
-        fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2));
+        if (!process.env.VERCEL) {
+            fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2));
+        }
         companyConfig = newConfig;
         
         res.json({
@@ -213,7 +215,7 @@ app.get('/api/export/:searchId/:format', async (req, res) => {
 
 // Inicializar FileWatcher para monitoramento automático
 const fileWatcher = require('./services/fileWatcher');
-const resultsPath = path.join(__dirname, '../../resultados');
+const resultsPath = process.env.VERCEL ? '/tmp/resultados' : path.join(__dirname, '../../resultados');
 
 // Iniciar monitoramento com FileWatcher
 fileWatcher.startWatching(resultsPath)
