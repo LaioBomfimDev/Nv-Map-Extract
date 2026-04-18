@@ -44,6 +44,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+backend/temp/
+temp/
 
 # Vercel
 .vercel
