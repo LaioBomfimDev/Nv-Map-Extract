@@ -256,23 +256,25 @@ app.use('*', (req, res) => {
 // INICIALIZAÇÃO DO SERVIDOR
 // ========================================
 
-app.listen(PORT, () => {
-    logger.info('🚀 DASHBOARD BACKEND INICIADO', {
-        port: PORT,
-        url: `http://localhost:${PORT}`,
-        empresa: companyConfig.company?.name || 'Dashboard Personalizado',
-        ambiente: process.env.NODE_ENV || 'development',
-        rotas: [
-            'GET  /api/health - Status do servidor',
-            'GET  /api/config - Configuração da empresa', 
-            'GET  /api/config/company - Configuração da empresa (alternativa)',
-            'GET  /api/system/status - Status do sistema',
-            'POST /api/search - Iniciar nova busca',
-            'GET  /api/dashboard/metrics - Métricas do dashboard',
-            'GET  /api/dashboard/charts - Gráficos do dashboard'
-        ]
+if (!process.env.VERCEL) {
+    app.listen(PORT, () => {
+        logger.info('🚀 DASHBOARD BACKEND INICIADO', {
+            port: PORT,
+            url: `http://localhost:${PORT}`,
+            empresa: companyConfig.company?.name || 'Dashboard Personalizado',
+            ambiente: process.env.NODE_ENV || 'development',
+            rotas: [
+                'GET  /api/health - Status do servidor',
+                'GET  /api/config - Configuração da empresa', 
+                'GET  /api/config/company - Configuração da empresa (alternativa)',
+                'GET  /api/system/status - Status do sistema',
+                'POST /api/search - Iniciar nova busca',
+                'GET  /api/dashboard/metrics - Métricas do dashboard',
+                'GET  /api/dashboard/charts - Gráficos do dashboard'
+            ]
+        });
     });
-});
+}
 
 // Tratamento de sinais de encerramento
 process.on('SIGINT', () => {
