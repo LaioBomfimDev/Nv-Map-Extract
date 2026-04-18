@@ -4,7 +4,7 @@ const path = require('path');
 const LOG_LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
 const currentLevel = LOG_LEVELS[process.env.LOG_LEVEL || 'info'];
 
-const logsDir = path.join(__dirname, '../../logs');
+const logsDir = process.env.VERCEL ? '/tmp/logs' : path.join(__dirname, '../../logs');
 if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
 function formatMessage(level, message, meta) {
