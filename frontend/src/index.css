@@ -37,3 +37,58 @@ body {
 ::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* --- Media Queries e Responsividade --- */
+
+/* Breakpoint para telas médias (Tablets/Notebooks pequenos) */
+@media (max-width: 1024px) {
+  .responsive-grid-scraper {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Breakpoint para telas pequenas (Mobile) */
+@media (max-width: 768px) {
+  .responsive-header {
+    flex-direction: column !important;
+    height: auto !important;
+    padding: 16px !important;
+    gap: 16px !important;
+  }
+  
+  .responsive-header nav {
+    width: 100% !important;
+    justify-content: center !important;
+    flex-wrap: wrap !important;
+  }
+
+  .responsive-header .nav-btn {
+    flex: 1 1 auto !important;
+    text-align: center !important;
+  }
+
+  .responsive-header .upload-btn-container {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  .responsive-grid-searches {
+    grid-template-columns: 1fr !important;
+  }
+
+  .responsive-split {
+    flex-direction: column !important;
+  }
+
+  .responsive-split > div {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    position: relative !important;
+    top: auto !important;
+  }
+  
+  .responsive-padding {
+    padding: 16px !important;
+  }
+}
+

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8" />
+    <title>Maps Search Extractor — Leads Extraídos</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f172a;
+            color: #f1f5f9;
+            min-height: 100vh;
+        }
+        header {
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            padding: 0 32px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .logo { display: flex; align-items: center; gap: 10px; }
+        .logo-icon {
+            width: 36px; height: 36px; border-radius: 10px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            display: flex; align-items: center; justify-content: center; font-size: 18px;
+        }
+        .logo-title { font-size: 15px; font-weight: 700; color: #f1f5f9; }
+        .logo-sub   { font-size: 11px; color: #64748b; }
+        .actions { display: flex; gap: 10px; align-items: center; }
+        .btn {
+            border: none; border-radius: 10px; padding: 8px 18px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            font-family: inherit; transition: opacity 0.2s, transform 0.15s;
+        }
+        .btn:hover { opacity: 0.85; transform: translateY(-1px); }
+        .btn-primary { background: linear-gradient(135deg, #22c55e, #16a34a); color: #fff; }
+        .btn-secondary { background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; }
+        .btn-clear { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+        main { padding: 32px; max-width: 1400px; margin: 0 auto; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+        .stat-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 14px;
+            padding: 18px;
+        }
+        .stat-label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+        .stat-value { font-size: 1.8rem; font-weight: 700; background: linear-gradient(135deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .filter-bar {
+            display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;
+        }
+        .filter-input {
+            background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+            padding: 8px 14px; color: #f1f5f9; font-size: 13px; outline: none;
+            transition: border-color 0.2s; flex: 1; min-width: 180px; font-family: inherit;
+        }
+        .filter-input:focus { border-color: #3b82f6; }
+        .filter-input::placeholder { color: #475569; }
+        .table-wrap {
+            background: #1e293b; border: 1px solid #334155; border-radius: 16px; overflow-x: auto;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th {
+            text-align: left; padding: 12px 14px; color: #64748b; font-weight: 500;
+            border-bottom: 1px solid #334155; white-space: nowrap; font-size: 11px;
+            text-transform: uppercase; letter-spacing: 0.04em;
+        }
+        td {
+            padding: 10px 14px; border-bottom: 1px solid rgba(51,65,85,0.4);
+            color: #94a3b8; max-width: 160px; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap;
+        }
+        tr td:first-child { color: #e2e8f0; font-weight: 500; }
+        tr:hover td { background: rgba(59,130,246,0.05); }
+        .rating { color: #f59e0b; font-weight: 600; }
+        a { color: #3b82f6; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .empty { text-align: center; padding: 60px 0; color: #475569; }
+        .empty-icon { font-size: 3rem; margin-bottom: 12px; }
+        .badge-email { background: rgba(34,197,94,0.15); color: #22c55e; padding: 2px 7px; border-radius: 6px; font-size: 10px; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <div class="logo-icon">🗺️</div>
+            <div>
+                <div class="logo-title">Maps Search Extractor</div>
+                <div class="logo-sub">Leads extraídos</div>
+            </div>
+        </div>
+        <div class="actions">
+            <span id="totalBadge" style="font-size:13px;color:#64748b;"></span>
+            <button class="btn btn-primary" id="btnSend">📤 Enviar ao Dashboard</button>
+            <button class="btn btn-secondary" id="btnCsv">⬇️ Baixar CSV</button>
+            <button class="btn btn-clear" id="btnClear">🗑️ Limpar</button>
+        </div>
+    </header>
+
+    <main>
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">Total de Leads</div>
+                <div class="stat-value" id="statTotal">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Com Email</div>
+                <div class="stat-value" id="statEmail">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Com Website</div>
+                <div class="stat-value" id="statWebsite">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Com Telefone</div>
+                <div class="stat-value" id="statPhone">0</div>
+            </div>
+        </div>
+
+        <div class="filter-bar">
+            <input class="filter-input" id="filterName"    placeholder="Filtrar por nome..." />
+            <input class="filter-input" id="filterCategory" placeholder="Filtrar por categoria..." />
+            <input class="filter-input" id="filterCity"    placeholder="Filtrar por endereço..." />
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>🏢 Nome</th>
+                        <th>🏷️ Categoria</th>
+                        <th>📞 Telefone</th>
+                        <th>📍 Endereço</th>
+                        <th>🌐 Website</th>
+                        <th>✉️ Email</th>
+                        <th>⭐ Avaliação</th>
+                        <th>💬 Reviews</th>
+                        <th>📷 Instagram</th>
+                        <th>👔 LinkedIn</th>
+                    </tr>
+                </thead>
+                <tbody id="tbody"></tbody>
+            </table>
+        </div>
+
+        <div id="statusMsg" style="margin-top:16px;font-size:13px;color:#64748b;"></div>
+    </main>
+
+    <script src="js/dashboard.js"></script>
+</body>
+</html>

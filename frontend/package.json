@@ -21,7 +21,7 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "dev": "npm start",
-    "serve": "npx serve -s build -l 3000",
+    "serve": "npx serve -s build -l 3005",
     "lint": "eslint src --ext .js,.jsx",
     "lint:fix": "eslint src --ext .js,.jsx --fix",
     "format": "prettier --write src/**/*.{js,jsx,css,json}",

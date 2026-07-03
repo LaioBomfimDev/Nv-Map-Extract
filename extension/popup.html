@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8" />
+    <title>Maps Search Extractor</title>
+    <link href="css/style.css" rel="stylesheet" />
+</head>
+<body>
+    <!-- Cabeçalho -->
+    <div class="popup-header">
+        <div class="popup-logo">🗺️</div>
+        <div>
+            <div class="popup-title">Maps Search Extractor</div>
+            <div class="popup-sub">by Maps Search Dashboard</div>
+        </div>
+    </div>
+
+    <div class="popup-body">
+
+        <!-- Busca rápida -->
+        <div class="input-group">
+            <div class="section-label">🔍 Busca Rápida no Google Maps</div>
+            <input
+                type="text"
+                id="searchInput"
+                class="input-field"
+                placeholder="ex: dentistas em São Paulo"
+                value=""
+            />
+        </div>
+        <button id="btnSearch" class="btn-search">Abrir no Google Maps</button>
+
+        <hr class="divider" />
+
+        <!-- Status do Dashboard -->
+        <div>
+            <div class="section-label">⚡ Status do Dashboard</div>
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Verificando conexão...</span>
+            </div>
+        </div>
+
+        <hr class="divider" />
+
+        <!-- Configuração de URL -->
+        <div class="input-group">
+            <div class="section-label">⚙️ URL do Backend</div>
+            <input
+                type="text"
+                id="dashboardUrl"
+                class="input-field"
+                placeholder="http://localhost:5000/api"
+            />
+            <div class="url-hint">Padrão: http://localhost:5000/api</div>
+            <button id="btnSave" class="btn-save">💾 Salvar URL</button>
+            <div id="savedMsg" class="saved-msg"></div>
+        </div>
+
+    </div>
+
+    <div class="footer">
+        Maps Search Dashboard — Tudo-em-Um
+    </div>
+
+    <script src="js/popup.js"></script>
+</body>
+</html>

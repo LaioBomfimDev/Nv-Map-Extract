@@ -5,6 +5,8 @@ const router = express.Router();
 
 const dashboardController = require('../controllers/dashboardController');
 const searchController = require('../controllers/searchController');
+const scraperController = require('../controllers/scraperController');
+const { importDirectLeads } = require('../controllers/searchController');
 const dataService = require('../services/dataService');
 
 // Configurar multer para upload
@@ -26,17 +28,34 @@ router.get('/dashboard/charts',  dashboardController.getCharts);
 router.get('/searches', searchController.getAllSearches);
 router.post('/upload', upload.single('file'), searchController.uploadFile);
 
+// Upload direto da extensão Chrome (JSON)
+router.post('/upload-direct', importDirectLeads);
+
+// Scraper integrado (Puppeteer)
+router.post('/scraper/start', scraperController.startScrape);
+router.post('/scraper/stop', scraperController.stopScrape);
+router.get('/scraper/status', scraperController.getScrapeStatus);
+
 // Resultados
 router.get('/results/:searchId', async (req, res) => {
     try {
         const { searchId } = req.params;
-        const { page = 1, limit = 50 } = req.query;
-        const data = await dataService.getResults(searchId, { page: parseInt(page), limit: parseInt(limit) });
+        const { page = 1, limit = 50, filters = {} } = req.query;
+        const parsedFilters = typeof filters === 'string' ? JSON.parse(filters) : filters;
+        
+        const data = await dataService.getResults(searchId, { 
+            page: parseInt(page), 
+            limit: parseInt(limit),
+            filters: parsedFilters
+        });
         res.json({ success: true, data });
     } catch (e) {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
+// Atualizar status do lead (CRM)
+router.patch('/results/:id/status', searchController.updateStatus);
 
 // Exportar
 router.get('/export/:searchId', async (req, res) => {

@@ -1,0 +1,103 @@
+{
+    "manifest_version": 3,
+    "name": "Maps Search Extractor",
+    "version": "2.0.0",
+    "description": "Extraia leads do Google Maps e envie diretamente para o seu Maps Search Dashboard.",
+    "icons": {
+        "16":  "icons/icon16.png",
+        "32":  "icons/icon32.png",
+        "48":  "icons/icon48.png",
+        "128": "icons/icon128.png"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://www.google.com/maps/*",
+                "https://www.google.com.br/maps/*",
+                "https://www.google.ad/maps/*",
+                "https://www.google.ae/maps/*",
+                "https://www.google.com.ar/maps/*",
+                "https://www.google.com.au/maps/*",
+                "https://www.google.ca/maps/*",
+                "https://www.google.cl/maps/*",
+                "https://www.google.com.co/maps/*",
+                "https://www.google.co.cr/maps/*",
+                "https://www.google.de/maps/*",
+                "https://www.google.es/maps/*",
+                "https://www.google.fr/maps/*",
+                "https://www.google.co.id/maps/*",
+                "https://www.google.co.in/maps/*",
+                "https://www.google.it/maps/*",
+                "https://www.google.co.jp/maps/*",
+                "https://www.google.com.mx/maps/*",
+                "https://www.google.nl/maps/*",
+                "https://www.google.pl/maps/*",
+                "https://www.google.pt/maps/*",
+                "https://www.google.ru/maps/*",
+                "https://www.google.co.uk/maps/*",
+                "https://www.google.com.uy/maps/*",
+                "https://www.google.co.ve/maps/*",
+                "https://www.google.co.za/maps/*"
+            ],
+            "js":  ["contentScript2.js"],
+            "css": ["css/contentScript.css"],
+            "all_frames": false,
+            "run_at": "document_start"
+        },
+        {
+            "matches": [
+                "https://www.google.com/maps/*",
+                "https://www.google.com.br/maps/*",
+                "https://www.google.ad/maps/*",
+                "https://www.google.ae/maps/*",
+                "https://www.google.com.ar/maps/*",
+                "https://www.google.com.au/maps/*",
+                "https://www.google.ca/maps/*",
+                "https://www.google.cl/maps/*",
+                "https://www.google.com.co/maps/*",
+                "https://www.google.co.cr/maps/*",
+                "https://www.google.de/maps/*",
+                "https://www.google.es/maps/*",
+                "https://www.google.fr/maps/*",
+                "https://www.google.co.id/maps/*",
+                "https://www.google.co.in/maps/*",
+                "https://www.google.it/maps/*",
+                "https://www.google.co.jp/maps/*",
+                "https://www.google.com.mx/maps/*",
+                "https://www.google.nl/maps/*",
+                "https://www.google.pl/maps/*",
+                "https://www.google.pt/maps/*",
+                "https://www.google.ru/maps/*",
+                "https://www.google.co.uk/maps/*",
+                "https://www.google.com.uy/maps/*",
+                "https://www.google.co.ve/maps/*",
+                "https://www.google.co.za/maps/*"
+            ],
+            "js":  ["contentScript.js"],
+            "css": ["css/contentScript.css"],
+            "all_frames": false,
+            "run_at": "document_end"
+        }
+    ],
+    "action": {
+        "default_icon": "icons/icon48.png",
+        "default_title": "Maps Search Extractor",
+        "default_popup": "popup.html"
+    },
+    "background": {
+        "service_worker": "bg.js"
+    },
+    "web_accessible_resources": [{
+        "resources": ["dashboard.html", "injected.js", "css/*"],
+        "matches":   ["<all_urls>"]
+    }],
+    "permissions": ["storage", "scripting"],
+    "host_permissions": [
+        "http://localhost/*",
+        "https://*/*",
+        "http://*/*"
+    ],
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'self'"
+    }
+}

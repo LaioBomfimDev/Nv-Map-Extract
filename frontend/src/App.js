@@ -2,10 +2,12 @@ import React, { useState, useRef } from 'react';
 import Dashboard from './components/Dashboard';
 import SearchList from './components/SearchList';
 import ResultsTable from './components/ResultsTable';
+import ScraperTab from './components/ScraperTab';
 import { api } from './api';
 
 const NAV = [
   { id: 'dashboard', label: '📊 Dashboard' },
+  { id: 'scraper',   label: '🔍 Buscar Leads' },
   { id: 'searches',  label: '📁 Importações' },
 ];
 
@@ -54,7 +56,7 @@ export default function App() {
       `}</style>
 
       {/* Header */}
-      <header style={{ background: '#1e293b', borderBottom: '1px solid #334155', padding: '0 32px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
+      <header className="responsive-header" style={{ background: '#1e293b', borderBottom: '1px solid #334155', padding: '0 32px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#3b82f6,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🗺️</div>
           <div>
@@ -66,7 +68,7 @@ export default function App() {
         {/* Nav */}
         <nav style={{ display: 'flex', gap: 4 }}>
           {NAV.map(n => (
-            <button key={n.id} onClick={() => setTab(n.id)}
+            <button key={n.id} onClick={() => setTab(n.id)} className="nav-btn"
               style={{
                 background: tab === n.id ? 'rgba(59,130,246,0.15)' : 'transparent',
                 color: tab === n.id ? '#3b82f6' : '#94a3b8',
@@ -79,7 +81,7 @@ export default function App() {
         </nav>
 
         {/* Upload */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="upload-btn-container" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {uploadMsg && <span style={{ fontSize: 13, color: uploadMsg.startsWith('✅') ? '#22c55e' : '#ef4444' }}>{uploadMsg}</span>}
           <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleUpload} />
           <button
@@ -92,7 +94,7 @@ export default function App() {
       </header>
 
       {/* Body */}
-      <div style={{ flex: 1, padding: '32px', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+      <div className="responsive-padding" style={{ flex: 1, padding: '32px', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
 
         {/* Dashboard tab */}
         {tab === 'dashboard' && (
@@ -105,9 +107,12 @@ export default function App() {
           </div>
         )}
 
+        {/* Scraper tab */}
+        {tab === 'scraper' && <ScraperTab />}
+
         {/* Searches tab */}
         {tab === 'searches' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 24, alignItems: 'start' }}>
+          <div className="responsive-grid-searches" style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 24, alignItems: 'start' }}>
             <div>
               <div style={{ marginBottom: 16 }}>
                 <h2 style={{ fontSize: 18, fontWeight: 600, color: '#f1f5f9' }}>Importações</h2>
@@ -115,7 +120,7 @@ export default function App() {
               </div>
               <SearchList onSelectSearch={handleSelectSearch} selectedId={selectedSearch?.id} />
             </div>
-            <div>
+            <div style={{ overflowX: 'auto' }}>
               {selectedSearch
                 ? <ResultsTable search={selectedSearch} />
                 : (
@@ -142,7 +147,7 @@ export default function App() {
 
       {/* Footer */}
       <footer style={{ textAlign: 'center', padding: '16px 32px', borderTop: '1px solid #1e293b', color: '#334155', fontSize: 12 }}>
-        Maps Search Dashboard — Backend: porta 5000 &nbsp;|&nbsp; Frontend: porta 3000
+        Maps Search Dashboard — Backend: porta 5000 &nbsp;|&nbsp; Frontend: porta {window.location.port || '3005'}
       </footer>
     </div>
   );

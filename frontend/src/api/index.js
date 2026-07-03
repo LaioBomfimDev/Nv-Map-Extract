@@ -13,8 +13,25 @@ export const api = {
     getMetrics:  () => request('/dashboard/metrics'),
     getCharts:   () => request('/dashboard/charts'),
     getSearches: () => request('/searches'),
-    getResults:  (id, page = 1, limit = 50) => request(`/results/${id}?page=${page}&limit=${limit}`),
+    getResults:  (id, page = 1, limit = 50, filters = {}) => {
+        const query = new URLSearchParams({
+            page,
+            limit,
+            filters: JSON.stringify(filters)
+        }).toString();
+        return request(`/results/${id}?${query}`);
+    },
+    updateResultStatus: (id, status) => request(`/results/${id}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status })
+    }),
     getExportUrl:(id) => `${API_BASE}/export/${id}`,
+    startScraper: (data) => request('/scraper/start', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    stopScraper: () => request('/scraper/stop', { method: 'POST' }),
+    getScraperStatus: () => request('/scraper/status'),
     getHealth:   () => request('/health'),
     uploadFile: (file) => {
         const form = new FormData();

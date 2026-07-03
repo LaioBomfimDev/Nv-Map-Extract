@@ -157,57 +157,8 @@ app.get('/api/system/status', async (req, res) => {
 });
 
 // ========================================
-// ROTAS DE RESULTADOS
+// ROTAS DE RESULTADOS CENTRALIZADAS EM ROUTES/API.JS
 // ========================================
-
-// Obter resultados de uma busca
-app.get('/api/results/:searchId', async (req, res) => {
-    try {
-        const { searchId } = req.params;
-        const { page = 1, limit = 50, filters = {} } = req.query;
-        
-        const results = await dataService.getResults(searchId, {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            filters: typeof filters === 'string' ? JSON.parse(filters) : filters
-        });
-        
-        res.json({
-            success: true,
-            data: results
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao obter resultados',
-            error: error.message
-        });
-    }
-});
-
-// Exportar resultados
-app.get('/api/export/:searchId/:format', async (req, res) => {
-    try {
-        const { searchId, format } = req.params;
-        const { filters = {} } = req.query;
-        
-        const exportResult = await searchController.exportResults(searchId, format, filters);
-        
-        if (exportResult.success) {
-            res.download(exportResult.filePath, exportResult.filename);
-        } else {
-            res.status(500).json(exportResult);
-        }
-        
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao exportar resultados',
-            error: error.message
-        });
-    }
-});
 
 // ========================================
 // MONITORAMENTO DE ARQUIVOS

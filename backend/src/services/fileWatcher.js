@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
+const XLSX = require('xlsx');
 const logger = require('../utils/logger');
 const dataService = require('./dataService');
 
@@ -53,8 +54,10 @@ function processFile(filePath) {
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.csv') {
         parseCsv(filePath);
+    } else if (['.xlsx', '.xls'].includes(ext)) {
+        parseXlsx(filePath);
     } else {
-        logger.warn('Formato XLSX não implementado ainda, use CSV', { file: filePath });
+        logger.warn('Formato não suportado pelo FileWatcher', { file: filePath });
     }
 }
 
@@ -70,7 +73,7 @@ function parseCsv(filePath) {
             }
             try {
                 const result = await dataService.saveSearch(path.basename(filePath), rows);
-                logger.info('Arquivo processado com sucesso', {
+                logger.info('Arquivo CSV processado com sucesso', {
                     file: path.basename(filePath),
                     records: rows.length,
                     searchId: result.id,
@@ -80,6 +83,34 @@ function parseCsv(filePath) {
             }
         })
         .on('error', (e) => logger.error('Erro ao ler CSV', { error: e.message, file: filePath }));
+}
+
+function parseXlsx(filePath) {
+    try {
+        const workbook = XLSX.readFile(filePath);
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(worksheet);
+
+        if (rows.length === 0) {
+            logger.warn('Arquivo Excel vazio', { file: path.basename(filePath) });
+            return;
+        }
+
+        dataService.saveSearch(path.basename(filePath), rows)
+            .then((result) => {
+                logger.info('Arquivo Excel processado com sucesso', {
+                    file: path.basename(filePath),
+                    records: rows.length,
+                    searchId: result.id,
+                });
+            })
+            .catch((e) => {
+                logger.error('Erro ao salvar dados do Excel', { error: e.message, file: filePath });
+            });
+    } catch (e) {
+        logger.error('Erro ao ler Excel', { error: e.message, file: filePath });
+    }
 }
 
 function stopWatching() {
@@ -94,19 +125,36 @@ function processUploadedFile(filePath, originalName = '') {
     return new Promise((resolve, reject) => {
         if (!fs.existsSync(filePath)) return reject(new Error('Arquivo não encontrado'));
         const ext = path.extname(originalName || filePath).toLowerCase();
-        if (ext !== '.csv') return reject(new Error('Apenas arquivos CSV são suportados'));
+        if (!['.csv', '.xlsx', '.xls'].includes(ext)) {
+            return reject(new Error('Apenas arquivos CSV, XLSX e XLS são suportados'));
+        }
 
-        const rows = [];
-        fs.createReadStream(filePath)
-            .pipe(csv())
-            .on('data', row => rows.push(row))
-            .on('end', async () => {
-                try {
-                    const result = await dataService.saveSearch(path.basename(originalName || filePath), rows);
-                    resolve({ ...result, records: rows.length });
-                } catch (e) { reject(e); }
-            })
-            .on('error', reject);
+        if (ext === '.csv') {
+            const rows = [];
+            fs.createReadStream(filePath)
+                .pipe(csv())
+                .on('data', row => rows.push(row))
+                .on('end', async () => {
+                    try {
+                        const result = await dataService.saveSearch(path.basename(originalName || filePath), rows);
+                        resolve({ ...result, records: rows.length });
+                    } catch (e) { reject(e); }
+                })
+                .on('error', reject);
+        } else {
+            try {
+                const workbook = XLSX.readFile(filePath);
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json(worksheet);
+
+                dataService.saveSearch(path.basename(originalName || filePath), rows)
+                    .then((result) => resolve({ ...result, records: rows.length }))
+                    .catch(reject);
+            } catch (e) {
+                reject(e);
+            }
+        }
     });
 }
 

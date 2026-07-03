@@ -27,6 +27,34 @@ async function uploadFile(req, res) {
     }
 }
 
+// Receber leads direto da extensão Chrome (formato JSON)
+async function importDirectLeads(req, res) {
+    try {
+        const { leads, filename, keyword, city } = req.body;
+        if (!leads || !Array.isArray(leads) || leads.length === 0) {
+            return res.status(400).json({ success: false, message: 'Nenhum lead recebido ou formato inválido' });
+        }
+
+        const name = filename || `extensao_${keyword || 'maps'}_${city || 'geral'}_${Date.now()}.json`;
+        const result = await dataService.saveSearch(name, leads, 'extension');
+
+        logger.info('Leads recebidos da extensão Chrome', {
+            filename: name,
+            total: leads.length,
+            searchId: result.id,
+        });
+
+        res.json({
+            success: true,
+            message: `${leads.length} leads salvos com sucesso no Dashboard`,
+            data: result,
+        });
+    } catch (e) {
+        logger.error('Erro ao importar leads da extensão', { error: e.message });
+        res.status(500).json({ success: false, message: e.message });
+    }
+}
+
 async function exportResults(searchId, format, filters) {
     try {
         const { data } = await dataService.getResults(searchId, { page: 1, limit: 99999, filters });
@@ -49,4 +77,24 @@ async function exportResults(searchId, format, filters) {
     }
 }
 
-module.exports = { getAllSearches, uploadFile, exportResults };
+async function updateStatus(req, res) {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+        if (!status) {
+            return res.status(400).json({ success: false, message: 'Status não informado' });
+        }
+        
+        const success = await dataService.updateProspectStatus(id, status);
+        if (success) {
+            res.json({ success: true, message: 'Status atualizado com sucesso' });
+        } else {
+            res.status(404).json({ success: false, message: 'Lead não encontrado' });
+        }
+    } catch (e) {
+        logger.error('Erro ao atualizar status do lead', { error: e.message });
+        res.status(500).json({ success: false, message: e.message });
+    }
+}
+
+module.exports = { getAllSearches, uploadFile, exportResults, importDirectLeads, updateStatus };
