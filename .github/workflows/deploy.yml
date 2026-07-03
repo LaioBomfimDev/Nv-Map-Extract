@@ -58,7 +58,7 @@ jobs:
         npm run build
       env:
         REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
-        REACT_APP_NAME: Maps Search Dashboard
+        REACT_APP_NAME: Friendly Miner Dashboard
         REACT_APP_VERSION: 1.0.0
 
   deploy:
