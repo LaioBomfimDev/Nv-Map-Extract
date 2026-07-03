@@ -1,6 +1,6 @@
-# Maps Search Dashboard
+# Friendly Miner
 
-Dashboard para análise de resultados de scraping do Google Maps com processamento automático de arquivos CSV e visualização em tempo real.
+Painel inteligente e amigável para inteligência geográfica e análise de leads extraídos do Google Maps com processamento automático de arquivos CSV e visualização em tempo real.
 
 ## 🚀 Funcionalidades
 
@@ -41,7 +41,7 @@ npm start
 ## 📊 Estrutura do Projeto
 
 ```
-mapssearch-dashboard/
+friendly-miner/
 ├── backend/          # API Node.js + Express
 ├── frontend/         # React App
 ├── database/         # SQLite Database
