@@ -3,12 +3,14 @@ import Dashboard from './components/Dashboard';
 import SearchList from './components/SearchList';
 import ResultsTable from './components/ResultsTable';
 import ScraperTab from './components/ScraperTab';
+import ProspectTab from './components/ProspectTab';
 import { api } from './api';
 
 const NAV = [
   { id: 'dashboard', label: '📊 Dashboard' },
   { id: 'scraper',   label: '🔍 Buscar Leads' },
   { id: 'searches',  label: '📁 Importações' },
+  { id: 'prospect',  label: '💬 Prospecção' },
 ];
 
 function Spinner() {
@@ -58,9 +60,9 @@ export default function App() {
       {/* Header */}
       <header className="responsive-header" style={{ background: '#1e293b', borderBottom: '1px solid #334155', padding: '0 32px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#3b82f6,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🗺️</div>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#f59e0b,#d97706)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⛏️</div>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9', lineHeight: 1.2 }}>Maps Search</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9', lineHeight: 1.2 }}>Friendly Miner</div>
             <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.2 }}>Dashboard</div>
           </div>
         </div>
@@ -70,9 +72,9 @@ export default function App() {
           {NAV.map(n => (
             <button key={n.id} onClick={() => setTab(n.id)} className="nav-btn"
               style={{
-                background: tab === n.id ? 'rgba(59,130,246,0.15)' : 'transparent',
-                color: tab === n.id ? '#3b82f6' : '#94a3b8',
-                border: tab === n.id ? '1px solid rgba(59,130,246,0.3)' : '1px solid transparent',
+                background: tab === n.id ? 'rgba(245,158,11,0.15)' : 'transparent',
+                color: tab === n.id ? '#f59e0b' : '#94a3b8',
+                border: tab === n.id ? '1px solid rgba(245,158,11,0.3)' : '1px solid transparent',
                 padding: '7px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 500, transition: 'all 0.2s',
               }}>
               {n.label}
@@ -87,7 +89,7 @@ export default function App() {
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            style={{ background: 'linear-gradient(135deg,#3b82f6,#8b5cf6)', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 10, cursor: uploading ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, opacity: uploading ? 0.7 : 1, transition: 'opacity 0.2s' }}>
+            style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 10, cursor: uploading ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, opacity: uploading ? 0.7 : 1, transition: 'opacity 0.2s' }}>
             {uploading ? <><Spinner /> Importando...</> : '📂 Importar CSV'}
           </button>
         </div>
@@ -96,19 +98,22 @@ export default function App() {
       {/* Body */}
       <div className="responsive-padding" style={{ flex: 1, padding: '32px', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
 
-        {/* Dashboard tab */}
+         {/* Dashboard tab */}
         {tab === 'dashboard' && (
           <div>
             <div style={{ marginBottom: 28 }}>
               <h1 style={{ fontSize: 26, fontWeight: 700, color: '#f1f5f9', marginBottom: 4 }}>Dashboard</h1>
               <p style={{ color: '#64748b', fontSize: 14 }}>Visão geral dos dados extraídos do Google Maps</p>
             </div>
-            <Dashboard onSelectSearch={handleSelectSearch} />
+            <Dashboard onSelectSearch={handleSelectSearch} onGoTo={setTab} />
           </div>
         )}
 
         {/* Scraper tab */}
         {tab === 'scraper' && <ScraperTab />}
+
+        {/* Prospect tab */}
+        {tab === 'prospect' && <ProspectTab />}
 
         {/* Searches tab */}
         {tab === 'searches' && (
@@ -118,7 +123,11 @@ export default function App() {
                 <h2 style={{ fontSize: 18, fontWeight: 600, color: '#f1f5f9' }}>Importações</h2>
                 <p style={{ color: '#64748b', fontSize: 13 }}>Selecione uma para ver os dados</p>
               </div>
-              <SearchList onSelectSearch={handleSelectSearch} selectedId={selectedSearch?.id} />
+              <SearchList 
+                onSelectSearch={handleSelectSearch} 
+                selectedId={selectedSearch?.id} 
+                onDeleted={(deletedId) => { if (selectedSearch?.id === deletedId) setSelectedSearch(null); }}
+              />
             </div>
             <div style={{ overflowX: 'auto' }}>
               {selectedSearch
@@ -147,7 +156,7 @@ export default function App() {
 
       {/* Footer */}
       <footer style={{ textAlign: 'center', padding: '16px 32px', borderTop: '1px solid #1e293b', color: '#334155', fontSize: 12 }}>
-        Maps Search Dashboard — Backend: porta 5000 &nbsp;|&nbsp; Frontend: porta {window.location.port || '3005'}
+        Friendly Miner Dashboard — Backend: porta 5000 &nbsp;|&nbsp; Frontend: porta {window.location.port || '3005'}
       </footer>
     </div>
   );

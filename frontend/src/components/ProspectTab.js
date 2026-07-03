@@ -19,6 +19,12 @@ export default function ProspectTab() {
   const [modalLead, setModalLead] = useState(null);
   const [actionMsg, setActionMsg] = useState('');
 
+  // Estados do Modo Mutirão
+  const [mutiraoActive, setMutiraoActive] = useState(false);
+  const [mutiraoIndex, setMutiraoIndex] = useState(0);
+  const [mutiraoLeads, setMutiraoLeads] = useState([]);
+  const [mutiraoLoading, setMutiraoLoading] = useState(false);
+
   const loadSummary = useCallback(async () => {
     try {
       const res = await api.getProspectSummary();
@@ -101,6 +107,23 @@ export default function ProspectTab() {
     setLeads(prev => prev.filter(l => l.id !== id));
     setTotal(t => Math.max(0, t - 1));
     loadSummary();
+  }
+
+  async function startMutirao() {
+    setMutiraoLoading(true);
+    try {
+      const res = await api.getAllLeads(1, 100, { prospect_status: 'fila' });
+      if (res.success && res.data.data.length > 0) {
+        setMutiraoLeads(res.data.data);
+        setMutiraoIndex(0);
+        setMutiraoActive(true);
+      } else {
+        alert('Nenhum lead na fila de envio no momento. Adicione leads à fila primeiro!');
+      }
+    } catch (e) {
+      alert('Erro ao carregar fila do mutirão');
+    }
+    setMutiraoLoading(false);
   }
 
   function applySuggestion(sug) {
@@ -203,6 +226,14 @@ export default function ProspectTab() {
             ✕ Limpar filtro de sugestão
           </button>
         )}
+        <button onClick={startMutirao} disabled={mutiraoLoading}
+          style={{
+            background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff', border: 'none',
+            padding: '9px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: 6
+          }}>
+          {mutiraoLoading ? 'Carregando Fila...' : '⚡ Modo Mutirão'}
+        </button>
         {actionMsg && <span style={{ fontSize: 13, color: '#22c55e' }}>{actionMsg}</span>}
       </div>
 
@@ -331,6 +362,137 @@ export default function ProspectTab() {
           onUpdated={onLeadUpdated}
           onDeleted={onLeadDeleted}
         />
+      )}
+
+      {/* Modal do Modo Mutirão */}
+      {mutiraoActive && mutiraoLeads[mutiraoIndex] && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, padding: 20
+          }}
+        >
+          <div
+            style={{
+              background: '#0f172a', border: '1px solid #334155', borderRadius: 24,
+              width: '100%', maxWidth: 500, padding: 28, boxShadow: '0 20px 50px rgba(0,0,0,0.6)',
+              display: 'flex', flexDirection: 'column', gap: 20
+            }}
+          >
+            {/* Cabeçalho */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', background: 'rgba(245,158,11,0.12)', padding: '3px 8px', borderRadius: 20, textTransform: 'uppercase' }}>
+                  ⚡ Modo Mutirão
+                </span>
+                <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                  Lead {mutiraoIndex + 1} de {mutiraoLeads.length} na fila
+                </div>
+              </div>
+              <button onClick={() => { setMutiraoActive(false); loadLeads(); loadSummary(); }} style={{ background: 'transparent', border: 'none', color: '#64748b', fontSize: 22, cursor: 'pointer' }}>×</button>
+            </div>
+
+            {/* Conteúdo do Lead Ativo */}
+            {(() => {
+              const lead = mutiraoLeads[mutiraoIndex];
+              const waUrl = getWhatsAppUrl(lead.phone);
+              return (
+                <>
+                  <div>
+                    <h3 style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9', marginBottom: 6 }}>{lead.name}</h3>
+                    <p style={{ fontSize: 13, color: '#94a3b8' }}>🏷️ {lead.category || 'Sem categoria'}</p>
+                    {lead.address && <p style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>📍 {lead.address}</p>}
+                  </div>
+
+                  {/* Botões de Ação */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {waUrl ? (
+                      <button onClick={() => window.open(waUrl, '_blank', 'noopener')}
+                        style={{
+                          background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff',
+                          border: 'none', padding: '12px', borderRadius: 12, cursor: 'pointer',
+                          fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
+                        }}>
+                        💬 Abrir WhatsApp
+                      </button>
+                    ) : (
+                      <div style={{ textAlign: 'center', color: '#ef4444', fontSize: 13, padding: 8, background: 'rgba(239,68,68,0.08)', borderRadius: 10 }}>
+                        ⚠️ Este lead não possui telefone cadastrado.
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+                      <button onClick={async () => {
+                        try {
+                          await api.updateLead(lead.id, { status: 'enviado' });
+                          // Avança para o próximo ou finaliza
+                          if (mutiraoIndex + 1 < mutiraoLeads.length) {
+                            setMutiraoIndex(prev => prev + 1);
+                          } else {
+                            alert('Parabéns! Você concluiu toda a fila do mutirão!');
+                            setMutiraoActive(false);
+                            loadLeads();
+                            loadSummary();
+                          }
+                        } catch (e) {
+                          alert('Erro ao atualizar status');
+                        }
+                      }}
+                        style={{
+                          flex: 1, background: '#8b5cf6', color: '#fff', border: 'none',
+                          padding: '11px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600
+                        }}>
+                        📤 Marcar como Enviado
+                      </button>
+
+                      <button onClick={() => {
+                        if (mutiraoIndex + 1 < mutiraoLeads.length) {
+                          setMutiraoIndex(prev => prev + 1);
+                        } else {
+                          alert('Fim da fila do mutirão reached.');
+                          setMutiraoActive(false);
+                          loadLeads();
+                          loadSummary();
+                        }
+                      }}
+                        style={{
+                          background: '#1e293b', border: '1px solid #334155', color: '#94a3b8',
+                          padding: '11px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13
+                        }}>
+                        Pular ➔
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Anotações no Mutirão */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>
+                      Anotações rápidas
+                    </label>
+                    <textarea
+                      placeholder="Anotações para este lead..."
+                      value={lead.notes || ''}
+                      onChange={(e) => {
+                        const txt = e.target.value;
+                        setMutiraoLeads(prev => prev.map((l, idx) => idx === mutiraoIndex ? { ...l, notes: txt } : l));
+                      }}
+                      onBlur={async () => {
+                        try {
+                          await api.updateLead(lead.id, { notes: lead.notes });
+                        } catch (e) { /* ignora */ }
+                      }}
+                      rows={2}
+                      style={{
+                        width: '100%', background: '#1e293b', border: '1px solid #334155', borderRadius: 10,
+                        padding: '8px 12px', color: '#f1f5f9', fontSize: 12, outline: 'none', resize: 'none', fontFamily: 'inherit'
+                      }}
+                    />
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
       )}
     </div>
   );
