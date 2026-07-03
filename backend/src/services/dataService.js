@@ -76,9 +76,19 @@ function createTables() {
             `ALTER TABLE results ADD COLUMN twitter TEXT`,
             `ALTER TABLE results ADD COLUMN youtube TEXT`,
             `ALTER TABLE results ADD COLUMN prospect_status TEXT DEFAULT 'novo'`,
+            `ALTER TABLE results ADD COLUMN notes TEXT`,
+            `ALTER TABLE results ADD COLUMN last_contact_at DATETIME`,
             `ALTER TABLE searches ADD COLUMN source TEXT DEFAULT 'csv'`,
         ];
         newCols.forEach(sql => db.run(sql, err => {})); // ignora erros de coluna já existente
+
+        // Migração de status legados para o funil de prospecção atual
+        const statusMigrations = [
+            `UPDATE results SET prospect_status = 'enviado' WHERE prospect_status = 'contatado'`,
+            `UPDATE results SET prospect_status = 'respondeu' WHERE prospect_status IN ('interessado', 'reuniao')`,
+            `UPDATE results SET prospect_status = 'descartado' WHERE prospect_status = 'recusado'`,
+        ];
+        statusMigrations.forEach(sql => db.run(sql, err => {}));
 
         logger.info('Tabelas criadas/verificadas com sucesso');
     });
@@ -262,44 +272,55 @@ function updateSearchTotals(searchId, total, status = 'completed') {
     });
 }
 
+// Monta as cláusulas de filtro compartilhadas entre getResults e getAllLeads.
+// `alias` prefixa as colunas quando a query usa JOIN (ex: 'r').
+function buildResultFilters(filters = {}, alias = '') {
+    const p = alias ? `${alias}.` : '';
+    let where = '';
+    const params = [];
+
+    // 1. Filtros textuais básicos
+    if (filters.name) { where += ` AND ${p}name LIKE ?`; params.push(`%${filters.name}%`); }
+    if (filters.category) { where += ` AND ${p}category LIKE ?`; params.push(`%${filters.category}%`); }
+    if (filters.city) { where += ` AND ${p}address LIKE ?`; params.push(`%${filters.city}%`); }
+
+    // 2. Filtro de Status CRM
+    if (filters.prospect_status) { where += ` AND ${p}prospect_status = ?`; params.push(filters.prospect_status); }
+
+    // 3. Filtros booleanos de dados de prospecção
+    if (filters.has_website === '1') { where += ` AND ${p}website IS NOT NULL AND ${p}website != '' AND ${p}website != '—'`; }
+    else if (filters.has_website === '0') { where += ` AND (${p}website IS NULL OR ${p}website = '' OR ${p}website = '—')`; }
+
+    if (filters.has_email === '1') { where += ` AND ${p}email IS NOT NULL AND ${p}email != '' AND ${p}email != '—'`; }
+    else if (filters.has_email === '0') { where += ` AND (${p}email IS NULL OR ${p}email = '' OR ${p}email = '—')`; }
+
+    if (filters.has_phone === '1') { where += ` AND ${p}phone IS NOT NULL AND ${p}phone != '' AND ${p}phone != '—'`; }
+    else if (filters.has_phone === '0') { where += ` AND (${p}phone IS NULL OR ${p}phone = '' OR ${p}phone = '—')`; }
+
+    // 4. Sem Redes Sociais
+    if (filters.no_social === '1') {
+        where += ` AND (${p}instagram IS NULL OR ${p}instagram = '') AND (${p}facebook IS NULL OR ${p}facebook = '') AND (${p}linkedin IS NULL OR ${p}linkedin = '') AND (${p}twitter IS NULL OR ${p}twitter = '') AND (${p}youtube IS NULL OR ${p}youtube = '')`;
+    }
+
+    // 5. Filtros de classificação por notas
+    if (filters.min_rating) { where += ` AND ${p}rating >= ?`; params.push(parseFloat(filters.min_rating)); }
+    if (filters.max_rating) { where += ` AND ${p}rating <= ?`; params.push(parseFloat(filters.max_rating)); }
+
+    // 6. Filtros de volume de avaliações
+    if (filters.min_reviews) { where += ` AND ${p}reviews_count >= ?`; params.push(parseInt(filters.min_reviews)); }
+    if (filters.max_reviews) { where += ` AND ${p}reviews_count <= ?`; params.push(parseInt(filters.max_reviews)); }
+
+    return { where, params };
+}
+
 function getResults(searchId, { page = 1, limit = 50, filters = {} } = {}) {
     return new Promise((resolve, reject) => {
         if (!db) return resolve({ data: [], total: 0, page, limit });
 
         const offset = (page - 1) * limit;
-        let where = 'WHERE search_id = ?';
-        const params = [searchId];
-
-        // 1. Filtros textuais básicos
-        if (filters.name) { where += ' AND name LIKE ?'; params.push(`%${filters.name}%`); }
-        if (filters.category) { where += ' AND category LIKE ?'; params.push(`%${filters.category}%`); }
-        if (filters.city) { where += ' AND address LIKE ?'; params.push(`%${filters.city}%`); }
-        
-        // 2. Filtro de Status CRM
-        if (filters.prospect_status) { where += ' AND prospect_status = ?'; params.push(filters.prospect_status); }
-
-        // 3. Filtros booleanos de dados de prospecção
-        if (filters.has_website === '1') { where += " AND website IS NOT NULL AND website != '' AND website != '—'"; }
-        else if (filters.has_website === '0') { where += " AND (website IS NULL OR website = '' OR website = '—')"; }
-
-        if (filters.has_email === '1') { where += " AND email IS NOT NULL AND email != '' AND email != '—'"; }
-        else if (filters.has_email === '0') { where += " AND (email IS NULL OR email = '' OR email = '—')"; }
-
-        if (filters.has_phone === '1') { where += " AND phone IS NOT NULL AND phone != '' AND phone != '—'"; }
-        else if (filters.has_phone === '0') { where += " AND (phone IS NULL OR phone = '' OR phone = '—')"; }
-
-        // 4. Sem Redes Sociais
-        if (filters.no_social === '1') {
-            where += " AND (instagram IS NULL OR instagram = '') AND (facebook IS NULL OR facebook = '') AND (linkedin IS NULL OR linkedin = '') AND (twitter IS NULL OR twitter = '') AND (youtube IS NULL OR youtube = '')";
-        }
-
-        // 5. Filtros de classificação por notas
-        if (filters.min_rating) { where += ' AND rating >= ?'; params.push(parseFloat(filters.min_rating)); }
-        if (filters.max_rating) { where += ' AND rating <= ?'; params.push(parseFloat(filters.max_rating)); }
-
-        // 6. Filtros de volume de avaliações
-        if (filters.min_reviews) { where += ' AND reviews_count >= ?'; params.push(parseInt(filters.min_reviews)); }
-        if (filters.max_reviews) { where += ' AND reviews_count <= ?'; params.push(parseInt(filters.max_reviews)); }
+        const built = buildResultFilters(filters);
+        const where = 'WHERE search_id = ?' + built.where;
+        const params = [searchId, ...built.params];
 
         db.get(`SELECT COUNT(*) as total FROM results ${where}`, params, (err, countRow) => {
             if (err) return reject(err);
@@ -315,18 +336,184 @@ function getResults(searchId, { page = 1, limit = 50, filters = {} } = {}) {
     });
 }
 
-function updateProspectStatus(resultId, status) {
+// Base unificada: todos os leads de todas as buscas, com origem
+function getAllLeads({ page = 1, limit = 50, filters = {} } = {}) {
+    return new Promise((resolve, reject) => {
+        if (!db) return resolve({ data: [], total: 0, page, limit });
+
+        const offset = (page - 1) * limit;
+        const built = buildResultFilters(filters, 'r');
+        const where = 'WHERE 1=1' + built.where;
+
+        db.get(`SELECT COUNT(*) as total FROM results r ${where}`, built.params, (err, countRow) => {
+            if (err) return reject(err);
+            db.all(
+                `SELECT r.*, s.filename AS search_filename, s.keyword AS search_keyword, s.city AS search_city
+                 FROM results r LEFT JOIN searches s ON s.id = r.search_id
+                 ${where} ORDER BY r.id DESC LIMIT ? OFFSET ?`,
+                [...built.params, limit, offset],
+                (err2, rows) => {
+                    if (err2) return reject(err2);
+                    resolve({ data: rows || [], total: countRow?.total || 0, page, limit });
+                }
+            );
+        });
+    });
+}
+
+function deleteSearch(searchId) {
     return new Promise((resolve, reject) => {
         if (!db) return resolve(false);
+        db.run(`DELETE FROM results WHERE search_id = ?`, [searchId], (err) => {
+            if (err) return reject(err);
+            db.run(`DELETE FROM searches WHERE id = ?`, [searchId], function (err2) {
+                if (err2) return reject(err2);
+                resolve(this.changes > 0);
+            });
+        });
+    });
+}
+
+function renameSearch(searchId, filename) {
+    return new Promise((resolve, reject) => {
+        if (!db) return resolve(false);
+        db.run(`UPDATE searches SET filename = ? WHERE id = ?`, [filename, searchId], function (err) {
+            if (err) return reject(err);
+            resolve(this.changes > 0);
+        });
+    });
+}
+
+// Recalcula total_results das buscas afetadas (após exclusão de leads)
+function recomputeSearchTotals(searchIds) {
+    return Promise.all(searchIds.map(id => new Promise((resolve) => {
         db.run(
-            `UPDATE results SET prospect_status = ? WHERE id = ?`,
-            [status, resultId],
+            `UPDATE searches SET total_results = (SELECT COUNT(*) FROM results WHERE search_id = ?) WHERE id = ?`,
+            [id, id],
+            () => resolve()
+        );
+    })));
+}
+
+function deleteResults(ids) {
+    return new Promise((resolve, reject) => {
+        if (!db || !ids.length) return resolve(0);
+        const placeholders = ids.map(() => '?').join(',');
+        db.all(`SELECT DISTINCT search_id FROM results WHERE id IN (${placeholders})`, ids, (err, rows) => {
+            if (err) return reject(err);
+            const searchIds = (rows || []).map(r => r.search_id).filter(Boolean);
+            db.run(`DELETE FROM results WHERE id IN (${placeholders})`, ids, function (err2) {
+                if (err2) return reject(err2);
+                const deleted = this.changes;
+                recomputeSearchTotals(searchIds).then(() => resolve(deleted));
+            });
+        });
+    });
+}
+
+// Atualiza status e/ou anotações de um lead; marca data de contato ao enviar
+function updateLead(resultId, { status, notes } = {}) {
+    return new Promise((resolve, reject) => {
+        if (!db) return resolve(false);
+        const sets = [];
+        const params = [];
+        if (status !== undefined) {
+            sets.push('prospect_status = ?');
+            params.push(status);
+            if (status === 'enviado') sets.push('last_contact_at = CURRENT_TIMESTAMP');
+        }
+        if (notes !== undefined) {
+            sets.push('notes = ?');
+            params.push(notes);
+        }
+        if (!sets.length) return resolve(false);
+        params.push(resultId);
+        db.run(`UPDATE results SET ${sets.join(', ')} WHERE id = ?`, params, function (err) {
+            if (err) return reject(err);
+            resolve(this.changes > 0);
+        });
+    });
+}
+
+function bulkUpdateStatus(ids, status) {
+    return new Promise((resolve, reject) => {
+        if (!db || !ids.length) return resolve(0);
+        const placeholders = ids.map(() => '?').join(',');
+        const extra = status === 'enviado' ? ', last_contact_at = CURRENT_TIMESTAMP' : '';
+        db.run(
+            `UPDATE results SET prospect_status = ?${extra} WHERE id IN (${placeholders})`,
+            [status, ...ids],
             function (err) {
                 if (err) return reject(err);
-                resolve(this.changes > 0);
+                resolve(this.changes);
             }
         );
     });
+}
+
+// Resumo da prospecção: contagens do funil, follow-ups atrasados e sugestões de alvos
+function getProspectSummary() {
+    return new Promise((resolve, reject) => {
+        if (!db) return resolve({ statusCounts: {}, followUps: { count: 0, sample: [] }, suggestions: [] });
+
+        db.all(`SELECT prospect_status AS status, COUNT(*) AS count FROM results GROUP BY prospect_status`, (err, rows) => {
+            if (err) return reject(err);
+            const statusCounts = {};
+            (rows || []).forEach(r => { statusCounts[r.status || 'novo'] = r.count; });
+
+            const followUpWhere = `prospect_status = 'enviado' AND last_contact_at IS NOT NULL AND last_contact_at <= datetime('now', '-3 day')`;
+            db.get(`SELECT COUNT(*) AS count FROM results WHERE ${followUpWhere}`, (err2, fuCount) => {
+                if (err2) return reject(err2);
+                db.all(`SELECT * FROM results WHERE ${followUpWhere} ORDER BY last_contact_at ASC LIMIT 5`, (err3, fuSample) => {
+                    if (err3) return reject(err3);
+
+                    const semSiteWhere = `prospect_status = 'novo' AND phone IS NOT NULL AND phone != '' AND (website IS NULL OR website = '')`;
+                    db.get(`SELECT COUNT(*) AS count FROM results WHERE ${semSiteWhere}`, (err4, ssCount) => {
+                        if (err4) return reject(err4);
+                        db.all(`SELECT * FROM results WHERE ${semSiteWhere} ORDER BY reviews_count DESC LIMIT 5`, (err5, ssSample) => {
+                            if (err5) return reject(err5);
+
+                            const semSocialWhere = `prospect_status = 'novo' AND phone IS NOT NULL AND phone != ''
+                                AND (instagram IS NULL OR instagram = '') AND (facebook IS NULL OR facebook = '')
+                                AND (linkedin IS NULL OR linkedin = '') AND (twitter IS NULL OR twitter = '') AND (youtube IS NULL OR youtube = '')`;
+                            db.get(`SELECT COUNT(*) AS count FROM results WHERE ${semSocialWhere}`, (err6, snCount) => {
+                                if (err6) return reject(err6);
+                                db.all(`SELECT * FROM results WHERE ${semSocialWhere} ORDER BY reviews_count DESC LIMIT 5`, (err7, snSample) => {
+                                    if (err7) return reject(err7);
+                                    resolve({
+                                        statusCounts,
+                                        followUps: { count: fuCount?.count || 0, sample: fuSample || [] },
+                                        suggestions: [
+                                            {
+                                                type: 'sem_site',
+                                                title: 'Têm telefone mas não têm site',
+                                                hint: 'Ótimos alvos para oferecer criação de site',
+                                                filters: { prospect_status: 'novo', has_phone: '1', has_website: '0' },
+                                                count: ssCount?.count || 0,
+                                                sample: ssSample || [],
+                                            },
+                                            {
+                                                type: 'sem_social',
+                                                title: 'Têm telefone mas não têm redes sociais',
+                                                hint: 'Oportunidade para gestão de redes/marketing',
+                                                filters: { prospect_status: 'novo', has_phone: '1', no_social: '1' },
+                                                count: snCount?.count || 0,
+                                                sample: snSample || [],
+                                            },
+                                        ],
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    });
+}
+
+function updateProspectStatus(resultId, status) {
+    return updateLead(resultId, { status });
 }
 
 function getDashboardMetrics() {
@@ -389,7 +576,14 @@ module.exports = {
     updateSearchTotals,
     getSearches,
     getResults,
+    getAllLeads,
     getDashboardMetrics,
     getRecentSearches,
     updateProspectStatus,
+    updateLead,
+    bulkUpdateStatus,
+    deleteSearch,
+    renameSearch,
+    deleteResults,
+    getProspectSummary,
 };

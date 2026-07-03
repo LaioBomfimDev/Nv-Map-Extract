@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import MapView from './MapView';
+import LeadModal from './LeadModal';
+import { STATUS_OPTIONS, getWhatsAppUrl } from '../statuses';
 
 const cols = [
     { key: 'name',            label: '🏢 Nome' },
@@ -14,15 +16,6 @@ const cols = [
     { key: 'socials',         label: '📱 Redes Sociais' }
 ];
 
-const STATUS_OPTIONS = [
-    { value: 'novo',        label: 'Novo 🔵' },
-    { value: 'contatado',   label: 'Contatado 🟡' },
-    { value: 'interessado',  label: 'Interessado 🟢' },
-    { value: 'reuniao',     label: 'Reunião Agendada 🟣' },
-    { value: 'fechado',     label: 'Fechado 🏆' },
-    { value: 'recusado',    label: 'Recusado 🔴' },
-];
-
 export default function ResultsTable({ search }) {
     const [data, setData] = useState([]);
     const [total, setTotal] = useState(0);
@@ -30,6 +23,9 @@ export default function ResultsTable({ search }) {
     const [loading, setLoading] = useState(false);
     const [showMap, setShowMap] = useState(false);
     const [showAdvFilters, setShowAdvFilters] = useState(false);
+    const [selected, setSelected] = useState(new Set());
+    const [modalLead, setModalLead] = useState(null);
+    const [actionMsg, setActionMsg] = useState('');
 
     // Estados dos Filtros Avançados
     const [filters, setFilters] = useState({
@@ -72,9 +68,10 @@ export default function ResultsTable({ search }) {
         setLoading(false);
     }, [search, page, filters]);
 
-    // Reseta página quando a busca selecionada muda ou os filtros mudam
-    useEffect(() => { 
-        setPage(1); 
+    // Reseta página e seleção quando a busca selecionada muda ou os filtros mudam
+    useEffect(() => {
+        setPage(1);
+        setSelected(new Set());
     }, [search, filters]);
 
     useEffect(() => { 
@@ -113,18 +110,62 @@ export default function ResultsTable({ search }) {
         });
     };
 
+    // ——— Seleção e ações em massa ———
+    const flash = (msg) => {
+        setActionMsg(msg);
+        setTimeout(() => setActionMsg(''), 3500);
+    };
 
+    const toggleSelect = (id) => {
+        setSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleSelectAll = () => {
+        setSelected(prev => prev.size === data.length ? new Set() : new Set(data.map(r => r.id)));
+    };
+
+    const bulkStatus = async (status, label) => {
+        const ids = [...selected];
+        if (!ids.length) return;
+        try {
+            await api.bulkStatus(ids, status);
+            flash(`✅ ${ids.length} leads movidos para "${label}"`);
+            setSelected(new Set());
+            load();
+        } catch {
+            flash('❌ Erro ao atualizar leads');
+        }
+    };
+
+    const bulkDelete = async () => {
+        const ids = [...selected];
+        if (!ids.length) return;
+        if (!window.confirm(`Apagar ${ids.length} leads definitivamente?`)) return;
+        try {
+            await api.bulkDelete(ids);
+            flash(`🗑️ ${ids.length} leads apagados`);
+            setSelected(new Set());
+            load();
+        } catch {
+            flash('❌ Erro ao apagar leads');
+        }
+    };
+
+    const onLeadUpdated = (updated) => {
+        setData(prev => prev.map(r => r.id === updated.id ? { ...r, ...updated } : r));
+        setModalLead(prev => prev && prev.id === updated.id ? { ...prev, ...updated } : prev);
+    };
+
+    const onLeadDeleted = (id) => {
+        setData(prev => prev.filter(r => r.id !== id));
+        setTotal(t => Math.max(0, t - 1));
+    };
 
     const totalPages = Math.max(1, Math.ceil(total / LIMIT));
-
-    // Formatar telefone e gerar link do WhatsApp
-    const getWhatsAppUrl = (phone) => {
-        if (!phone) return null;
-        const clean = phone.replace(/\D/g, '');
-        if (clean.length < 8) return null;
-        const withDDI = clean.startsWith('55') ? clean : '55' + clean;
-        return `https://wa.me/${withDDI}`;
-    };
 
     // Renderizar ícones das redes sociais
     const renderSocials = (row) => {
@@ -236,7 +277,7 @@ export default function ResultsTable({ search }) {
                             >
                                 <option value="">Todos</option>
                                 {STATUS_OPTIONS.map(opt => (
-                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    <option key={opt.value} value={opt.value}>{opt.emoji} {opt.label}</option>
                                 ))}
                             </select>
                         </div>
@@ -323,6 +364,29 @@ export default function ResultsTable({ search }) {
                 </div>
             )}
 
+            {/* Barra de ações em massa */}
+            {selected.size > 0 && (
+                <div style={{
+                    background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 12,
+                    padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                }}>
+                    <span style={{ fontSize: 13, color: '#93c5fd', fontWeight: 600 }}>{selected.size} selecionados:</span>
+                    <button onClick={() => bulkStatus('fila', 'Na fila')}
+                        style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.35)', padding: '6px 13px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                        📌 Enviar depois
+                    </button>
+                    <button onClick={() => bulkStatus('enviado', 'Mensagem enviada')}
+                        style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.35)', padding: '6px 13px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                        📤 Marcar enviada
+                    </button>
+                    <button onClick={bulkDelete}
+                        style={{ background: 'transparent', color: '#ef4444', border: '1px solid rgba(239,68,68,0.35)', padding: '6px 13px', borderRadius: 8, cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>
+                        🗑️ Apagar selecionados
+                    </button>
+                </div>
+            )}
+            {actionMsg && <span style={{ fontSize: 13, color: '#22c55e' }}>{actionMsg}</span>}
+
             {/* Layout Flexbox com Mapa Lateral (Split Screen) */}
             <div className="responsive-split" style={{ display: 'flex', gap: 20, alignItems: 'start', flexWrap: 'wrap' }}>
                 {/* Tabela de Leads */}
@@ -331,6 +395,9 @@ export default function ResultsTable({ search }) {
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                             <thead>
                                 <tr>
+                                    <th style={{ padding: '12px 14px', borderBottom: '1px solid #334155', width: 36 }}>
+                                        <input type="checkbox" checked={data.length > 0 && selected.size === data.length} onChange={toggleSelectAll} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} />
+                                    </th>
                                     {cols.map(c => (
                                         <th key={c.key} style={{ textAlign: 'left', padding: '12px 16px', color: '#64748b', fontWeight: 500, borderBottom: '1px solid #334155', whiteSpace: 'nowrap', fontSize: 12 }}>
                                             {c.label}
@@ -340,7 +407,7 @@ export default function ResultsTable({ search }) {
                             </thead>
                             <tbody>
                                 {loading && (
-                                    <tr><td colSpan={cols.length} style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>Carregando leads...</td></tr>
+                                    <tr><td colSpan={cols.length + 1} style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>Carregando leads...</td></tr>
                                 )}
                                 {!loading && data.map((row, i) => {
                                     const waUrl = getWhatsAppUrl(row.phone);
@@ -349,9 +416,17 @@ export default function ResultsTable({ search }) {
                                             onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.04)'}
                                             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                                         >
-                                            {/* Nome */}
-                                            <td style={{ padding: '11px 16px', color: '#e2e8f0', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.name}>
-                                                {row.name || '—'}
+                                            {/* Seleção */}
+                                            <td style={{ padding: '11px 14px' }}>
+                                                <input type="checkbox" checked={selected.has(row.id)} onChange={() => toggleSelect(row.id)} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} />
+                                            </td>
+
+                                            {/* Nome (abre a ficha da empresa) */}
+                                            <td onClick={() => setModalLead(row)}
+                                                style={{ padding: '11px 16px', color: '#e2e8f0', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}
+                                                title={`${row.name} — clique para abrir a ficha`}>
+                                                <span style={{ borderBottom: '1px dashed #475569' }}>{row.name || '—'}</span>
+                                                {row.notes && <span title="Tem anotações" style={{ marginLeft: 5 }}>📝</span>}
                                             </td>
                                             
                                             {/* Categoria */}
@@ -370,7 +445,7 @@ export default function ResultsTable({ search }) {
                                                     }}
                                                 >
                                                     {STATUS_OPTIONS.map(opt => (
-                                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                        <option key={opt.value} value={opt.value}>{opt.emoji} {opt.label}</option>
                                                     ))}
                                                 </select>
                                             </td>
@@ -416,8 +491,8 @@ export default function ResultsTable({ search }) {
 
                                             {/* Avaliação */}
                                             <td style={{ padding: '11px 16px', color: '#94a3b8', whiteSpace: 'nowrap' }}>
-                                                {row.rating > 0 
-                                                    ? <span style={{ color: '#f59e0b', fontWeight: 600 }}>★ {row.rating.toFixed(1)} <span style={{ fontSize: 11, color: '#64748b', fontWeight: 400 }}>(${row.reviews_count || 0})</span></span>
+                                                {row.rating > 0
+                                                    ? <span style={{ color: '#f59e0b', fontWeight: 600 }}>★ {row.rating.toFixed(1)} <span style={{ fontSize: 11, color: '#64748b', fontWeight: 400 }}>({row.reviews_count || 0})</span></span>
                                                     : '—'
                                                 }
                                             </td>
@@ -430,7 +505,7 @@ export default function ResultsTable({ search }) {
                                     );
                                 })}
                                 {!loading && !data.length && (
-                                    <tr><td colSpan={cols.length} style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>Nenhum lead correspondente aos filtros</td></tr>
+                                    <tr><td colSpan={cols.length + 1} style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>Nenhum lead correspondente aos filtros</td></tr>
                                 )}
                             </tbody>
                         </table>
@@ -466,6 +541,16 @@ export default function ResultsTable({ search }) {
                     </div>
                 )}
             </div>
+
+            {/* Modal da ficha da empresa */}
+            {modalLead && (
+                <LeadModal
+                    lead={modalLead}
+                    onClose={() => setModalLead(null)}
+                    onUpdated={onLeadUpdated}
+                    onDeleted={onLeadDeleted}
+                />
+            )}
         </div>
     );
 }

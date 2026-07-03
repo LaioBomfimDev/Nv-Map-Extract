@@ -77,6 +77,37 @@ async function exportResults(searchId, format, filters) {
     }
 }
 
+// Apagar uma busca/importação e todos os seus leads
+async function deleteSearch(req, res) {
+    try {
+        const { id } = req.params;
+        const ok = await dataService.deleteSearch(id);
+        if (!ok) return res.status(404).json({ success: false, message: 'Busca não encontrada' });
+        logger.info('Busca apagada', { searchId: id });
+        res.json({ success: true, message: 'Busca apagada com sucesso' });
+    } catch (e) {
+        logger.error('Erro ao apagar busca', { error: e.message });
+        res.status(500).json({ success: false, message: e.message });
+    }
+}
+
+// Renomear uma busca/importação
+async function renameSearch(req, res) {
+    try {
+        const { id } = req.params;
+        const { filename } = req.body || {};
+        if (!filename || !String(filename).trim()) {
+            return res.status(400).json({ success: false, message: 'Informe o novo nome.' });
+        }
+        const ok = await dataService.renameSearch(id, String(filename).trim());
+        if (!ok) return res.status(404).json({ success: false, message: 'Busca não encontrada' });
+        res.json({ success: true, message: 'Busca renomeada com sucesso' });
+    } catch (e) {
+        logger.error('Erro ao renomear busca', { error: e.message });
+        res.status(500).json({ success: false, message: e.message });
+    }
+}
+
 async function updateStatus(req, res) {
     try {
         const { id } = req.params;
@@ -97,4 +128,4 @@ async function updateStatus(req, res) {
     }
 }
 
-module.exports = { getAllSearches, uploadFile, exportResults, importDirectLeads, updateStatus };
+module.exports = { getAllSearches, uploadFile, exportResults, importDirectLeads, updateStatus, deleteSearch, renameSearch };

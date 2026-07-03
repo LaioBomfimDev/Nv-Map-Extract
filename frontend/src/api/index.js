@@ -32,6 +32,32 @@ export const api = {
     }),
     stopScraper: () => request('/scraper/stop', { method: 'POST' }),
     getScraperStatus: () => request('/scraper/status'),
+    deleteSearch: (id) => request(`/searches/${id}`, { method: 'DELETE' }),
+    renameSearch: (id, filename) => request(`/searches/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ filename })
+    }),
+    getAllLeads: (page = 1, limit = 50, filters = {}) => {
+        const query = new URLSearchParams({
+            page,
+            limit,
+            filters: JSON.stringify(filters)
+        }).toString();
+        return request(`/leads?${query}`);
+    },
+    updateLead: (id, data) => request(`/results/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data)
+    }),
+    bulkStatus: (ids, status) => request('/results/bulk-status', {
+        method: 'POST',
+        body: JSON.stringify({ ids, status })
+    }),
+    bulkDelete: (ids) => request('/results/bulk-delete', {
+        method: 'POST',
+        body: JSON.stringify({ ids })
+    }),
+    getProspectSummary: () => request('/prospect/summary'),
     getHealth:   () => request('/health'),
     uploadFile: (file) => {
         const form = new FormData();

@@ -6,6 +6,7 @@ const router = express.Router();
 const dashboardController = require('../controllers/dashboardController');
 const searchController = require('../controllers/searchController');
 const scraperController = require('../controllers/scraperController');
+const leadsController = require('../controllers/leadsController');
 const { importDirectLeads } = require('../controllers/searchController');
 const dataService = require('../services/dataService');
 
@@ -26,7 +27,16 @@ router.get('/dashboard/charts',  dashboardController.getCharts);
 
 // Buscas
 router.get('/searches', searchController.getAllSearches);
+router.delete('/searches/:id', searchController.deleteSearch);
+router.patch('/searches/:id', searchController.renameSearch);
 router.post('/upload', upload.single('file'), searchController.uploadFile);
+
+// Base unificada de leads + prospecção
+router.get('/leads', leadsController.getAllLeads);
+router.get('/prospect/summary', leadsController.getProspectSummary);
+router.post('/results/bulk-status', leadsController.bulkStatus);
+router.post('/results/bulk-delete', leadsController.bulkDelete);
+router.patch('/results/:id', leadsController.updateLead);
 
 // Upload direto da extensão Chrome (JSON)
 router.post('/upload-direct', importDirectLeads);
