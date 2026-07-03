@@ -1,7 +1,7 @@
 {
-  "name": "mapssearch-dashboard",
+  "name": "friendly-miner",
   "version": "1.0.0",
-  "description": "Dashboard para análise de resultados de scraping do Google Maps",
+  "description": "Friendly Miner - Plataforma amigável para mineração e análise de leads do Google Maps",
   "main": "index.js",
   "workspaces": [
     "frontend",

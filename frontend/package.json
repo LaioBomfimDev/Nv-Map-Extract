@@ -1,7 +1,7 @@
 {
-  "name": "mapssearch-dashboard-frontend",
+  "name": "friendly-miner-frontend",
   "version": "1.0.0",
-  "description": "Frontend personalizado para Google Maps Scraper - Interface React moderna e responsiva",
+  "description": "Interface React moderna e amigável para o Friendly Miner",
   "private": true,
   "homepage": ".",
   "dependencies": {

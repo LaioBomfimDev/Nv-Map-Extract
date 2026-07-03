@@ -1,7 +1,7 @@
 {
-  "name": "mapssearch-dashboard-backend",
+  "name": "friendly-miner-backend",
   "version": "1.0.0",
-  "description": "Backend personalizado para Google Maps Scraper Dashboard",
+  "description": "Backend amigável para o ecossistema Friendly Miner",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
