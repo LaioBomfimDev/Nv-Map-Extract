@@ -58,6 +58,8 @@ export const api = {
         body: JSON.stringify({ ids })
     }),
     getProspectSummary: () => request('/prospect/summary'),
+    getIgnored: () => request('/ignored'),
+    restoreIgnored: (id) => request(`/ignored/${id}`, { method: 'DELETE' }),
     getHealth:   () => request('/health'),
     uploadFile: (file) => {
         const form = new FormData();

@@ -37,6 +37,8 @@ router.get('/prospect/summary', leadsController.getProspectSummary);
 router.post('/results/bulk-status', leadsController.bulkStatus);
 router.post('/results/bulk-delete', leadsController.bulkDelete);
 router.patch('/results/:id', leadsController.updateLead);
+router.get('/ignored', leadsController.getIgnored);
+router.delete('/ignored/:id', leadsController.restoreIgnored);
 
 // Upload direto da extensão Chrome (JSON)
 router.post('/upload-direct', importDirectLeads);

@@ -24,11 +24,15 @@ function startWatching(watchPath) {
                 awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
             });
 
-            watcher.on('add', (filePath) => {
-                if (isValidScrapeFile(filePath)) {
-                    logger.info('Novo arquivo detectado', { file: path.basename(filePath) });
-                    processFile(filePath);
+            watcher.on('add', async (filePath) => {
+                if (!isValidScrapeFile(filePath)) return;
+                const filename = path.basename(filePath);
+                // Não reimportar arquivo já processado (evita ressuscitar buscas apagadas a cada reinício)
+                if (await dataService.isFileProcessed(filename)) {
+                    return;
                 }
+                logger.info('Novo arquivo detectado', { file: filename });
+                processFile(filePath);
             });
 
             watcher.on('error', (error) => logger.error('Erro no FileWatcher', { error: error.message }));
@@ -73,6 +77,7 @@ function parseCsv(filePath) {
             }
             try {
                 const result = await dataService.saveSearch(path.basename(filePath), rows);
+                await dataService.markFileProcessed(path.basename(filePath));
                 logger.info('Arquivo CSV processado com sucesso', {
                     file: path.basename(filePath),
                     records: rows.length,
@@ -98,7 +103,8 @@ function parseXlsx(filePath) {
         }
 
         dataService.saveSearch(path.basename(filePath), rows)
-            .then((result) => {
+            .then(async (result) => {
+                await dataService.markFileProcessed(path.basename(filePath));
                 logger.info('Arquivo Excel processado com sucesso', {
                     file: path.basename(filePath),
                     records: rows.length,
@@ -137,6 +143,7 @@ function processUploadedFile(filePath, originalName = '') {
                 .on('end', async () => {
                     try {
                         const result = await dataService.saveSearch(path.basename(originalName || filePath), rows);
+                        await dataService.markFileProcessed(path.basename(originalName || filePath));
                         resolve({ ...result, records: rows.length });
                     } catch (e) { reject(e); }
                 })

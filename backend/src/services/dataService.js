@@ -90,6 +90,22 @@ function createTables() {
         ];
         statusMigrations.forEach(sql => db.run(sql, err => {}));
 
+        // Empresas apagadas pelo usuário: nunca mais reimportar nem sugerir
+        db.run(`CREATE TABLE IF NOT EXISTS ignored_leads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            place_id TEXT,
+            phone TEXT,
+            name TEXT,
+            address TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+
+        // Arquivos já importados pelo FileWatcher (evita reimportação a cada reinício)
+        db.run(`CREATE TABLE IF NOT EXISTS processed_files (
+            filename TEXT PRIMARY KEY,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+
         logger.info('Tabelas criadas/verificadas com sucesso');
     });
 }
@@ -122,6 +138,22 @@ function saveSearch(filename, data, source = 'csv') {
     });
 }
 
+// Verifica se a empresa foi apagada pelo usuário (não deve voltar ao sistema)
+function isLeadIgnored(placeId, phone, name, address) {
+    return new Promise((resolve) => {
+        if (!db) return resolve(false);
+        db.get(
+            `SELECT 1 FROM ignored_leads WHERE
+                (place_id != '' AND place_id = ?) OR
+                (phone != '' AND phone = ?) OR
+                (name != '' AND name = ? AND address = ?)
+             LIMIT 1`,
+            [placeId || '', phone || '', name || '', address || ''],
+            (err, row) => resolve(Boolean(row))
+        );
+    });
+}
+
 async function saveResults(searchId, rows) {
     if (!db || !rows.length) return;
 
@@ -143,6 +175,12 @@ async function saveResults(searchId, rows) {
         const linkedin = row.linkedin || '';
         const twitter = row.twitter || '';
         const youtube = row.youtube || '';
+
+        // Empresa apagada pelo usuário: não reimportar
+        if (await isLeadIgnored(placeId, phone, name, address)) {
+            logger.info('Lead ignorado (apagado anteriormente pelo usuário)', { name });
+            continue;
+        }
 
         await new Promise((resolveRow) => {
             // Verificar duplicidade: por telefone (se houver) OU por nome + endereço exato
@@ -399,15 +437,60 @@ function deleteResults(ids) {
     return new Promise((resolve, reject) => {
         if (!db || !ids.length) return resolve(0);
         const placeholders = ids.map(() => '?').join(',');
-        db.all(`SELECT DISTINCT search_id FROM results WHERE id IN (${placeholders})`, ids, (err, rows) => {
+        db.all(`SELECT id, search_id, place_id, phone, name, address FROM results WHERE id IN (${placeholders})`, ids, (err, rows) => {
             if (err) return reject(err);
-            const searchIds = (rows || []).map(r => r.search_id).filter(Boolean);
+            const searchIds = [...new Set((rows || []).map(r => r.search_id).filter(Boolean))];
+
+            // Registrar na lista de ignorados: essas empresas não voltam em buscas futuras
+            (rows || []).forEach(r => {
+                db.run(
+                    `INSERT INTO ignored_leads (place_id, phone, name, address) VALUES (?, ?, ?, ?)`,
+                    [r.place_id || '', r.phone || '', r.name || '', r.address || ''],
+                    () => {}
+                );
+            });
+
             db.run(`DELETE FROM results WHERE id IN (${placeholders})`, ids, function (err2) {
                 if (err2) return reject(err2);
                 const deleted = this.changes;
                 recomputeSearchTotals(searchIds).then(() => resolve(deleted));
             });
         });
+    });
+}
+
+function getIgnoredLeads() {
+    return new Promise((resolve, reject) => {
+        if (!db) return resolve([]);
+        db.all(`SELECT * FROM ignored_leads ORDER BY created_at DESC`, (err, rows) => {
+            if (err) return reject(err);
+            resolve(rows || []);
+        });
+    });
+}
+
+// Remove da lista de ignorados: a empresa volta a poder aparecer em buscas futuras
+function restoreIgnoredLead(id) {
+    return new Promise((resolve, reject) => {
+        if (!db) return resolve(false);
+        db.run(`DELETE FROM ignored_leads WHERE id = ?`, [id], function (err) {
+            if (err) return reject(err);
+            resolve(this.changes > 0);
+        });
+    });
+}
+
+function isFileProcessed(filename) {
+    return new Promise((resolve) => {
+        if (!db) return resolve(false);
+        db.get(`SELECT 1 FROM processed_files WHERE filename = ?`, [filename], (err, row) => resolve(Boolean(row)));
+    });
+}
+
+function markFileProcessed(filename) {
+    return new Promise((resolve) => {
+        if (!db) return resolve();
+        db.run(`INSERT OR IGNORE INTO processed_files (filename) VALUES (?)`, [filename], () => resolve());
     });
 }
 
@@ -586,4 +669,8 @@ module.exports = {
     renameSearch,
     deleteResults,
     getProspectSummary,
+    getIgnoredLeads,
+    restoreIgnoredLead,
+    isFileProcessed,
+    markFileProcessed,
 };

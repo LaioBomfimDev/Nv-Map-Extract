@@ -90,4 +90,27 @@ async function getProspectSummary(req, res) {
     }
 }
 
-module.exports = { getAllLeads, updateLead, bulkStatus, bulkDelete, getProspectSummary };
+// GET /api/ignored — empresas apagadas que não serão mais importadas/sugeridas
+async function getIgnored(req, res) {
+    try {
+        const data = await dataService.getIgnoredLeads();
+        res.json({ success: true, data });
+    } catch (e) {
+        logger.error('Erro ao listar ignorados', { error: e.message });
+        res.status(500).json({ success: false, message: e.message });
+    }
+}
+
+// DELETE /api/ignored/:id — restaura (a empresa volta a poder aparecer em buscas futuras)
+async function restoreIgnored(req, res) {
+    try {
+        const ok = await dataService.restoreIgnoredLead(req.params.id);
+        if (!ok) return res.status(404).json({ success: false, message: 'Registro não encontrado' });
+        res.json({ success: true, message: 'Empresa removida da lista de ignorados' });
+    } catch (e) {
+        logger.error('Erro ao restaurar ignorado', { error: e.message });
+        res.status(500).json({ success: false, message: e.message });
+    }
+}
+
+module.exports = { getAllLeads, updateLead, bulkStatus, bulkDelete, getProspectSummary, getIgnored, restoreIgnored };
