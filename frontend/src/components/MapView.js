@@ -61,40 +61,40 @@ export default function MapView({ leads }) {
             const lat = parseFloat(lead.latitude);
             const lng = parseFloat(lead.longitude);
 
-            // Cria um popup HTML personalizado
+            // Cria um popup HTML personalizado com cantos retos e cores adequadas
             const formattedPhone = (lead.phone || '').replace(/\D/g, '');
             const whatsappLink = formattedPhone 
                 ? `https://wa.me/${formattedPhone.startsWith('55') ? formattedPhone : '55' + formattedPhone}` 
                 : null;
 
             const popupContent = `
-                <div style="font-family: 'Inter', sans-serif; color: #1e293b; padding: 4px; min-width: 180px;">
-                    <h4 style="margin: 0 0 4px 0; font-size: 13px; font-weight: 700; color: #0f172a;">${lead.name}</h4>
-                    <p style="margin: 0 0 6px 0; font-size: 11px; color: #64748b;">🏷️ ${lead.category || 'Sem categoria'}</p>
-                    <p style="margin: 0 0 8px 0; font-size: 11px; color: #64748b;">📍 ${lead.address || 'Sem endereço'}</p>
+                <div style="font-family: 'Inter', sans-serif; color: #fafafa; padding: 6px; min-width: 190px; background: #18181b;">
+                    <h4 style="margin: 0 0 4px 0; font-size: 13px; font-weight: 700; color: #fafafa;">${lead.name}</h4>
+                    <p style="margin: 0 0 6px 0; font-size: 11px; color: #a1a1aa;">Categoria: ${lead.category || 'Sem categoria'}</p>
+                    <p style="margin: 0 0 8px 0; font-size: 11px; color: #52525b;">Endereço: ${lead.address || 'Sem endereço'}</p>
                     <div style="display: flex; gap: 6px;">
                         ${whatsappLink ? `
-                            <a href="${whatsappLink}" target="_blank" style="background: #22c55e; color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 11px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
-                                💬 WhatsApp
+                            <a href="${whatsappLink}" target="_blank" style="background: #10b981; color: #fff; padding: 4px 8px; border-radius: 0px; font-size: 11px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                                WhatsApp
                             </a>
                         ` : ''}
                         ${lead.website ? `
-                            <a href="${lead.website}" target="_blank" style="background: #3b82f6; color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 11px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
-                                🌐 Site
+                            <a href="${lead.website}" target="_blank" style="background: #06b6d4; color: #fff; padding: 4px 8px; border-radius: 0px; font-size: 11px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                                Site
                             </a>
                         ` : ''}
                     </div>
                 </div>
             `;
 
-            // Pin customizado (círculo colorido estilo moderno)
+            // Pin customizado (círculo colorido estilo moderno verde esmeralda)
             const marker = window.L.circleMarker([lat, lng], {
                 radius: 8,
-                fillColor: '#3b82f6',
+                fillColor: '#10b981',
                 color: '#ffffff',
-                weight: 2,
+                weight: 1.5,
                 opacity: 1,
-                fillOpacity: 0.85
+                fillOpacity: 0.9
             });
 
             marker.bindPopup(popupContent);
@@ -120,10 +120,10 @@ export default function MapView({ leads }) {
                 width: '100%', 
                 height: '100%', 
                 minHeight: '400px', 
-                borderRadius: '16px', 
-                border: '1px solid #334155',
+                borderRadius: '0px', 
+                border: '1px solid #27272a',
                 overflow: 'hidden',
-                background: '#1e293b'
+                background: '#18181b'
             }} 
         />
     );

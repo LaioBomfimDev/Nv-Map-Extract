@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
+import { Edit, Trash2 } from './Icons';
 
 export default function SearchList({ onSelectSearch, selectedId, onDeleted }) {
     const [searches, setSearches] = useState([]);
@@ -42,12 +43,13 @@ export default function SearchList({ onSelectSearch, selectedId, onDeleted }) {
         } catch { /* mantém o nome antigo */ }
     }
 
-    if (loading) return <p style={{ color: '#64748b', textAlign: 'center', padding: 20 }}>Carregando...</p>;
-    if (!searches.length) return <p style={{ color: '#64748b', fontSize: 14, padding: '20px 0' }}>Nenhuma importação ainda.</p>;
+    if (loading) return <p style={{ color: '#52525b', textAlign: 'center', padding: 20, fontFamily: 'var(--font-mono)' }}>Carregando...</p>;
+    if (!searches.length) return <p style={{ color: '#52525b', fontSize: 14, padding: '20px 0' }}>Nenhuma importação ainda.</p>;
 
     const actionBtn = {
         background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 12,
-        padding: '2px 4px', borderRadius: 6, lineHeight: 1, opacity: 0.75,
+        padding: '4px 6px', borderRadius: 0, lineHeight: 1, opacity: 0.75,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center'
     };
 
     return (
@@ -57,9 +59,9 @@ export default function SearchList({ onSelectSearch, selectedId, onDeleted }) {
                     key={s.id}
                     onClick={() => editingId !== s.id && onSelectSearch(s)}
                     style={{
-                        background: selectedId === s.id ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.03)',
-                        border: selectedId === s.id ? '1px solid #3b82f6' : '1px solid #334155',
-                        borderRadius: 12,
+                        background: selectedId === s.id ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.02)',
+                        border: selectedId === s.id ? '1px solid #10b981' : '1px solid #27272a',
+                        borderRadius: 0,
                         padding: '12px 16px',
                         cursor: 'pointer',
                         textAlign: 'left',
@@ -79,22 +81,26 @@ export default function SearchList({ onSelectSearch, selectedId, onDeleted }) {
                                 if (e.key === 'Escape') setEditingId(null);
                             }}
                             style={{
-                                width: '100%', background: '#0f172a', border: '1px solid #3b82f6', borderRadius: 8,
-                                padding: '5px 8px', color: '#f1f5f9', fontSize: 13, outline: 'none', marginBottom: 6,
+                                width: '100%', background: '#0e0e11', border: '1px solid #10b981', borderRadius: 0,
+                                padding: '5px 8px', color: '#fafafa', fontSize: 13, outline: 'none', marginBottom: 6,
                             }}
                         />
                     ) : (
                         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6, marginBottom: 4 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9', wordBreak: 'break-all', flex: 1 }}>{s.filename}</div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#fafafa', wordBreak: 'break-all', flex: 1 }}>{s.filename}</div>
                             <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-                                <button title="Renomear" onClick={e => startRename(e, s)} style={actionBtn}>✏️</button>
-                                <button title="Apagar busca e leads" onClick={e => handleDelete(e, s)} style={actionBtn}>🗑️</button>
+                                <button title="Renomear" onClick={e => startRename(e, s)} style={actionBtn}>
+                                  <Edit size={13} color="#a1a1aa" />
+                                </button>
+                                <button title="Apagar busca e leads" onClick={e => handleDelete(e, s)} style={actionBtn}>
+                                  <Trash2 size={13} color="#ef4444" />
+                                </button>
                             </div>
                         </div>
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: 12, color: '#64748b' }}>{(s.total_results || 0).toLocaleString('pt-BR')} registros</span>
-                        <span style={{ fontSize: 11, color: '#475569' }}>{new Date(s.created_at).toLocaleDateString('pt-BR')}</span>
+                        <span className="mono" style={{ fontSize: 12, color: '#a1a1aa' }}>{(s.total_results || 0).toLocaleString('pt-BR')} registros</span>
+                        <span className="mono" style={{ fontSize: 11, color: '#52525b' }}>{new Date(s.created_at).toLocaleDateString('pt-BR')}</span>
                     </div>
                 </div>
             ))}

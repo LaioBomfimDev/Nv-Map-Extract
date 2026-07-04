@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import LeadModal from './LeadModal';
 import { STATUS_OPTIONS, getStatusMeta, getWhatsAppUrl, timeSince } from '../statuses';
+import { LayoutGrid, Clock, Lightbulb, Zap, X, Pin, Send, XCircle, Trash2, StickyNote, MessageCircle, ArrowRight, Tag, MapPin, AlertTriangle, DynIcon } from './Icons';
 
-const card = { background: '#1e293b', border: '1px solid #334155', borderRadius: 16 };
+const card = { background: '#18181b', border: '1px solid #27272a', borderRadius: 0 };
 const LIMIT = 50;
 
 export default function ProspectTab() {
@@ -24,6 +25,10 @@ export default function ProspectTab() {
   const [mutiraoIndex, setMutiraoIndex] = useState(0);
   const [mutiraoLeads, setMutiraoLeads] = useState([]);
   const [mutiraoLoading, setMutiraoLoading] = useState(false);
+
+  // Empresas ignoradas (apagadas — nunca mais importadas/sugeridas)
+  const [ignored, setIgnored] = useState([]);
+  const [showIgnored, setShowIgnored] = useState(false);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -47,9 +52,27 @@ export default function ProspectTab() {
     setLoading(false);
   }, [page, statusFilter, extraFilters, nameFilter]);
 
+  const loadIgnored = useCallback(async () => {
+    try {
+      const res = await api.getIgnored();
+      if (res.success) setIgnored(res.data);
+    } catch { /* backend indisponível */ }
+  }, []);
+
   useEffect(() => { loadSummary(); }, [loadSummary]);
   useEffect(() => { loadLeads(); }, [loadLeads]);
+  useEffect(() => { loadIgnored(); }, [loadIgnored]);
   useEffect(() => { setPage(1); setSelected(new Set()); }, [statusFilter, extraFilters, nameFilter]);
+
+  async function restoreIgnored(item) {
+    try {
+      await api.restoreIgnored(item.id);
+      setIgnored(prev => prev.filter(i => i.id !== item.id));
+      flash(`"${item.name}" poderá aparecer em buscas futuras novamente`);
+    } catch {
+      flash('Erro ao restaurar empresa');
+    }
+  }
 
   function flash(msg) {
     setActionMsg(msg);
@@ -92,6 +115,7 @@ export default function ProspectTab() {
       setSelected(new Set());
       loadLeads();
       loadSummary();
+      loadIgnored();
     } catch {
       flash('❌ Erro ao apagar leads');
     }
@@ -107,6 +131,7 @@ export default function ProspectTab() {
     setLeads(prev => prev.filter(l => l.id !== id));
     setTotal(t => Math.max(0, t - 1));
     loadSummary();
+    loadIgnored();
   }
 
   async function startMutirao() {
@@ -147,8 +172,8 @@ export default function ProspectTab() {
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, color: '#f1f5f9', marginBottom: 4 }}>Prospecção</h1>
-        <p style={{ color: '#64748b', fontSize: 14 }}>Controle quem já recebeu mensagem, quem está na fila e quem respondeu</p>
+        <h1 style={{ fontSize: 26, fontWeight: 700, color: '#fafafa', marginBottom: 4 }}>Prospecção</h1>
+        <p style={{ color: '#52525b', fontSize: 14 }}>Controle quem já recebeu mensagem, quem está na fila e quem respondeu</p>
       </div>
 
       {/* ——— Funil: cartões por status ——— */}
@@ -156,11 +181,14 @@ export default function ProspectTab() {
         <button onClick={clearFilters}
           style={{
             ...card, padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
-            border: !statusFilter && !hasExtraFilters ? '1px solid #3b82f6' : card.border,
-            background: !statusFilter && !hasExtraFilters ? 'rgba(59,130,246,0.08)' : card.background,
+            border: !statusFilter && !hasExtraFilters ? '1px solid #10b981' : card.border,
+            background: !statusFilter && !hasExtraFilters ? 'rgba(16,185,129,0.08)' : card.background,
           }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#f1f5f9' }}>{totalLeads}</div>
-          <div style={{ fontSize: 12, color: '#94a3b8' }}>🗂️ Todos</div>
+          <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: '#fafafa' }}>{totalLeads}</div>
+          <div style={{ fontSize: 12, color: '#a1a1aa', display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            <LayoutGrid size={13} color="#a1a1aa" />
+            <span>Todos</span>
+          </div>
         </button>
         {STATUS_OPTIONS.map(opt => {
           const active = statusFilter === opt.value;
@@ -171,8 +199,11 @@ export default function ProspectTab() {
                 border: active ? `1px solid ${opt.color}` : card.border,
                 background: active ? `${opt.color}12` : card.background,
               }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: opt.color }}>{counts[opt.value] || 0}</div>
-              <div style={{ fontSize: 12, color: '#94a3b8' }}>{opt.emoji} {opt.label}</div>
+              <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: opt.color }}>{counts[opt.value] || 0}</div>
+              <div style={{ fontSize: 12, color: '#a1a1aa', display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                <DynIcon name={opt.icon} size={13} color={opt.color} />
+                <span>{opt.label}</span>
+              </div>
             </button>
           );
         })}
@@ -181,14 +212,15 @@ export default function ProspectTab() {
       {/* ——— Alerta de follow-up ——— */}
       {followUps.count > 0 && (
         <div style={{
-          background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 14,
+          background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 0,
           padding: '14px 20px', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
         }}>
-          <span style={{ fontSize: 13, color: '#c4b5fd' }}>
-            ⏰ <strong>{followUps.count}</strong> {followUps.count === 1 ? 'lead recebeu' : 'leads receberam'} mensagem há 3+ dias e ainda {followUps.count === 1 ? 'está' : 'estão'} sem resposta. Que tal um follow-up?
+          <span style={{ fontSize: 13, color: '#c4b5fd', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Clock size={14} color="#8b5cf6" />
+            <span><strong>{followUps.count}</strong> {followUps.count === 1 ? 'lead recebeu' : 'leads receberam'} mensagem há 3+ dias e ainda {followUps.count === 1 ? 'está' : 'estão'} sem resposta. Que tal um follow-up?</span>
           </span>
           <button onClick={() => { setExtraFilters({}); setStatusFilter('enviado'); }}
-            style={{ background: '#8b5cf6', color: '#fff', border: 'none', padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+            style={{ background: '#8b5cf6', color: '#fff', border: 'none', padding: '7px 16px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
             Ver enviados
           </button>
         </div>
@@ -200,11 +232,14 @@ export default function ProspectTab() {
           {suggestions.map(sug => (
             <div key={sug.type} style={{ ...card, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div>
-                <div style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600 }}>💡 {sug.count} {sug.title.toLowerCase()}</div>
-                <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{sug.hint}</div>
+                <div style={{ fontSize: 13, color: '#e4e4e7', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Lightbulb size={14} color="#f59e0b" />
+                  <span>{sug.count} {sug.title.toLowerCase()}</span>
+                </div>
+                <div style={{ fontSize: 12, color: '#52525b', marginTop: 2 }}>{sug.hint}</div>
               </div>
               <button onClick={() => applySuggestion(sug)}
-                style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)', padding: '7px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+                style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', padding: '7px 14px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
                 Ver leads
               </button>
             </div>
@@ -214,51 +249,58 @@ export default function ProspectTab() {
 
       {/* ——— Barra de busca + filtro ativo ——— */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input
-          value={nameFilter}
-          onChange={e => setNameFilter(e.target.value)}
-          placeholder="🔎 Buscar empresa por nome..."
-          style={{ flex: 1, minWidth: 220, background: '#1e293b', border: '1px solid #334155', borderRadius: 10, padding: '9px 14px', color: '#f1f5f9', fontSize: 13, outline: 'none' }}
-        />
+        <div style={{ flex: 1, minWidth: 220, position: 'relative' }}>
+          <input
+            value={nameFilter}
+            onChange={e => setNameFilter(e.target.value)}
+            placeholder="Buscar empresa por nome..."
+            style={{ width: '100%', background: '#18181b', border: '1px solid #27272a', borderRadius: 0, padding: '9px 14px', color: '#fafafa', fontSize: 13, outline: 'none' }}
+          />
+        </div>
         {hasExtraFilters && (
           <button onClick={clearFilters}
-            style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '8px 14px', borderRadius: 10, cursor: 'pointer', fontSize: 12 }}>
-            ✕ Limpar filtro de sugestão
+            style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', padding: '8px 14px', borderRadius: 0, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <X size={12} />
+            <span>Limpar filtro de sugestão</span>
           </button>
         )}
         <button onClick={startMutirao} disabled={mutiraoLoading}
           style={{
-            background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff', border: 'none',
-            padding: '9px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+            background: 'linear-gradient(135deg,#10b981,#06b6d4)', color: '#fff', border: 'none',
+            padding: '9px 16px', borderRadius: 0, cursor: 'pointer', fontSize: 13, fontWeight: 600,
             display: 'flex', alignItems: 'center', gap: 6
           }}>
-          {mutiraoLoading ? 'Carregando Fila...' : '⚡ Modo Mutirão'}
+          {mutiraoLoading ? 'Carregando Fila...' : <><Zap size={14} /> Modo Mutirão</>}
         </button>
-        {actionMsg && <span style={{ fontSize: 13, color: '#22c55e' }}>{actionMsg}</span>}
+        {actionMsg && <span style={{ fontSize: 13, color: '#10b981' }}>{actionMsg}</span>}
       </div>
 
       {/* ——— Barra de ações em massa ——— */}
       {selected.size > 0 && (
         <div style={{
-          background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 12,
+          background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 0,
           padding: '10px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
         }}>
-          <span style={{ fontSize: 13, color: '#93c5fd', fontWeight: 600 }}>{selected.size} selecionados:</span>
+          <span className="mono" style={{ fontSize: 13, color: '#10b981', fontWeight: 600 }}>{selected.size} selecionados:</span>
           <button onClick={() => bulkAction('fila', 'Na fila')}
-            style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.35)', padding: '6px 13px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-            📌 Enviar depois
+            style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.35)', padding: '6px 13px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Pin size={12} color="#f59e0b" />
+            <span>Enviar depois</span>
           </button>
           <button onClick={() => bulkAction('enviado', 'Mensagem enviada')}
-            style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.35)', padding: '6px 13px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-            📤 Marcar enviada
+            style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.35)', padding: '6px 13px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Send size={12} color="#a78bfa" />
+            <span>Marcar enviada</span>
           </button>
           <button onClick={() => bulkAction('descartado', 'Descartado')}
-            style={{ background: 'rgba(100,116,139,0.15)', color: '#94a3b8', border: '1px solid #334155', padding: '6px 13px', borderRadius: 8, cursor: 'pointer', fontSize: 12 }}>
-            ❌ Descartar
+            style={{ background: 'rgba(82,82,91,0.15)', color: '#a1a1aa', border: '1px solid #27272a', padding: '6px 13px', borderRadius: 0, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <XCircle size={12} color="#a1a1aa" />
+            <span>Descartar</span>
           </button>
           <button onClick={bulkDelete}
-            style={{ background: 'transparent', color: '#ef4444', border: '1px solid rgba(239,68,68,0.35)', padding: '6px 13px', borderRadius: 8, cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>
-            🗑️ Apagar
+            style={{ background: 'transparent', color: '#ef4444', border: '1px solid rgba(239,68,68,0.35)', padding: '6px 13px', borderRadius: 0, cursor: 'pointer', fontSize: 12, marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Trash2 size={12} color="#ef4444" />
+            <span>Apagar</span>
           </button>
         </div>
       )}
@@ -269,68 +311,72 @@ export default function ProspectTab() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr>
-                <th style={{ padding: '12px 14px', borderBottom: '1px solid #334155', width: 36 }}>
-                  <input type="checkbox" checked={leads.length > 0 && selected.size === leads.length} onChange={toggleSelectAll} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} />
+                <th style={{ padding: '12px 14px', borderBottom: '1px solid #27272a', width: 36 }}>
+                  <input type="checkbox" checked={leads.length > 0 && selected.size === leads.length} onChange={toggleSelectAll} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
                 </th>
                 {['Empresa', 'Status', 'Contato', 'Último contato', 'Origem', ''].map((h, i) => (
-                  <th key={i} style={{ textAlign: 'left', padding: '12px 14px', color: '#64748b', fontWeight: 500, borderBottom: '1px solid #334155', fontSize: 12, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
+                  <th key={i} style={{ textAlign: 'left', padding: '12px 14px', color: '#52525b', fontWeight: 500, borderBottom: '1px solid #27272a', fontSize: 12, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>Carregando leads...</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#52525b', fontFamily: 'var(--font-mono)' }}>Carregando leads...</td></tr>
               )}
               {!loading && leads.map(lead => {
                 const meta = getStatusMeta(lead.prospect_status);
                 const waUrl = getWhatsAppUrl(lead.phone);
                 return (
                   <tr key={lead.id}
-                      style={{ transition: 'background 0.15s', cursor: 'pointer' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.04)'}
+                      style={{ transition: 'background 0.15s', cursor: 'pointer', borderBottom: '1px solid #18181b' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(16,185,129,0.04)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    <td style={{ padding: '10px 14px' }} onClick={e => e.stopPropagation()}>
-                      <input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggleSelect(lead.id)} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} />
+                    <td style={{ padding: '14px 14px' }} onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggleSelect(lead.id)} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
                     </td>
-                    <td onClick={() => setModalLead(lead)} style={{ padding: '10px 14px', maxWidth: 220 }}>
-                      <div style={{ color: '#e2e8f0', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.name}>
-                        {lead.name}
-                        {lead.notes && <span title="Tem anotações" style={{ marginLeft: 6 }}>📝</span>}
+                    <td onClick={() => setModalLead(lead)} style={{ padding: '14px 14px', maxWidth: 220 }}>
+                      <div style={{ color: '#fafafa', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }} title={lead.name}>
+                        <span>{lead.name}</span>
+                        {lead.notes && <StickyNote size={12} color="#a1a1aa" title="Tem anotações" />}
                       </div>
-                      <div style={{ color: '#64748b', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.category || '—'}</div>
+                      <div style={{ color: '#52525b', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>{lead.category || '—'}</div>
                     </td>
-                    <td onClick={() => setModalLead(lead)} style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: meta.color, background: `${meta.color}18`, padding: '3px 10px', borderRadius: 20 }}>
-                        {meta.emoji} {meta.label}
+                    <td onClick={() => setModalLead(lead)} style={{ padding: '14px 14px', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: meta.color, background: `${meta.color}18`, padding: '3px 10px', borderRadius: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <DynIcon name={meta.icon} size={11} color={meta.color} />
+                        <span>{meta.label}</span>
                       </span>
                     </td>
-                    <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                    <td style={{ padding: '14px 14px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ color: '#94a3b8' }}>{lead.phone || '—'}</span>
+                        <span className="mono" style={{ color: '#a1a1aa' }}>{lead.phone || '—'}</span>
                         {waUrl && (
                           <a href={waUrl} target="_blank" rel="noreferrer" title="Abrir WhatsApp"
-                             style={{ textDecoration: 'none', background: 'rgba(34,197,94,0.15)', width: 24, height: 24, borderRadius: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>
-                            💬
+                             style={{ textDecoration: 'none', background: 'rgba(16,185,129,0.15)', color: '#10b981', width: 24, height: 24, borderRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>
+                            <MessageCircle size={12} color="#10b981" />
                           </a>
                         )}
                       </div>
                     </td>
-                    <td onClick={() => setModalLead(lead)} style={{ padding: '10px 14px', color: '#64748b', whiteSpace: 'nowrap', fontSize: 12 }}>
+                    <td onClick={() => setModalLead(lead)} style={{ padding: '14px 14px', color: '#52525b', whiteSpace: 'nowrap', fontSize: 12 }}>
                       {lead.last_contact_at ? timeSince(lead.last_contact_at) : '—'}
                     </td>
-                    <td onClick={() => setModalLead(lead)} style={{ padding: '10px 14px', color: '#64748b', fontSize: 11, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.search_filename}>
+                    <td onClick={() => setModalLead(lead)} style={{ padding: '14px 14px', color: '#52525b', fontSize: 11, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.search_filename}>
                       {lead.search_keyword || lead.search_filename || '—'}
                     </td>
-                    <td onClick={() => setModalLead(lead)} style={{ padding: '10px 14px', textAlign: 'right' }}>
-                      <span style={{ color: '#3b82f6', fontSize: 12, fontWeight: 500 }}>Abrir →</span>
+                    <td onClick={() => setModalLead(lead)} style={{ padding: '14px 14px', textAlign: 'right' }}>
+                      <span style={{ color: '#10b981', fontSize: 12, fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span>Abrir</span>
+                        <ArrowRight size={12} />
+                      </span>
                     </td>
                   </tr>
                 );
               })}
               {!loading && !leads.length && (
-                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 50, color: '#64748b' }}>
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 50, color: '#52525b' }}>
                   {totalLeads === 0
-                    ? 'Nenhum lead ainda. Use a aba 🔍 Buscar Leads para capturar os primeiros!'
+                    ? 'Nenhum lead ainda. Use a aba Buscar Leads para capturar os primeiros!'
                     : 'Nenhum lead com esses filtros.'}
                 </td></tr>
               )}
@@ -343,14 +389,46 @@ export default function ProspectTab() {
       {totalPages > 1 && (
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 18 }}>
           <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-            style={{ background: '#1e293b', border: '1px solid #334155', color: '#94a3b8', padding: '8px 18px', borderRadius: 8, cursor: page === 1 ? 'not-allowed' : 'pointer', fontSize: 13 }}>
+            style={{ background: '#18181b', border: '1px solid #27272a', color: '#a1a1aa', padding: '8px 18px', borderRadius: 0, cursor: page === 1 ? 'not-allowed' : 'pointer', fontSize: 13 }}>
             ← Anterior
           </button>
-          <span style={{ color: '#64748b', fontSize: 13 }}>Página {page} de {totalPages} · {total.toLocaleString('pt-BR')} leads</span>
+          <span style={{ color: '#52525b', fontSize: 13 }}>Página {page} de {totalPages} · <span className="mono">{total.toLocaleString('pt-BR')}</span> leads</span>
           <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-            style={{ background: '#1e293b', border: '1px solid #334155', color: '#94a3b8', padding: '8px 18px', borderRadius: 8, cursor: page === totalPages ? 'not-allowed' : 'pointer', fontSize: 13 }}>
+            style={{ background: '#18181b', border: '1px solid #27272a', color: '#a1a1aa', padding: '8px 18px', borderRadius: 0, cursor: page === totalPages ? 'not-allowed' : 'pointer', fontSize: 13 }}>
             Próxima →
           </button>
+        </div>
+      )}
+
+      {/* ——— Empresas ignoradas (apagadas pelo usuário) ——— */}
+      {ignored.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <button onClick={() => setShowIgnored(v => !v)}
+            style={{ background: 'transparent', border: 'none', color: '#52525b', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}>
+            <XCircle size={13} color="#52525b" />
+            <span><span className="mono">{ignored.length}</span> {ignored.length === 1 ? 'empresa ignorada' : 'empresas ignoradas'} — apagadas por você, nunca mais serão importadas nem sugeridas</span>
+            <span style={{ fontSize: 10 }}>{showIgnored ? '▲' : '▼'}</span>
+          </button>
+
+          {showIgnored && (
+            <div style={{ ...card, marginTop: 10, maxHeight: 260, overflowY: 'auto' }}>
+              {ignored.map(item => (
+                <div key={item.id} style={{ padding: '10px 16px', borderBottom: '1px solid #18181b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: '#a1a1aa', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name || '(sem nome)'}</div>
+                    <div className="mono" style={{ fontSize: 11, color: '#52525b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {[item.phone, item.address].filter(Boolean).join(' · ') || '—'}
+                    </div>
+                  </div>
+                  <button onClick={() => restoreIgnored(item)}
+                    title="Permitir que esta empresa volte a aparecer em buscas futuras"
+                    style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)', padding: '5px 12px', borderRadius: 0, cursor: 'pointer', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>
+                    Restaurar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -368,13 +446,13 @@ export default function ProspectTab() {
       {mutiraoActive && mutiraoLeads[mutiraoIndex] && (
         <div
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(4px)',
+            position: 'fixed', inset: 0, background: 'rgba(9,9,11,0.85)', backdropFilter: 'blur(4px)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, padding: 20
           }}
         >
           <div
             style={{
-              background: '#0f172a', border: '1px solid #334155', borderRadius: 24,
+              background: '#09090b', border: '1px solid #27272a', borderRadius: 0,
               width: '100%', maxWidth: 500, padding: 28, boxShadow: '0 20px 50px rgba(0,0,0,0.6)',
               display: 'flex', flexDirection: 'column', gap: 20
             }}
@@ -382,14 +460,15 @@ export default function ProspectTab() {
             {/* Cabeçalho */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', background: 'rgba(245,158,11,0.12)', padding: '3px 8px', borderRadius: 20, textTransform: 'uppercase' }}>
-                  ⚡ Modo Mutirão
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#10b981', background: 'rgba(16,185,129,0.12)', padding: '3px 8px', borderRadius: 0, textTransform: 'uppercase', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Zap size={12} color="#10b981" />
+                  <span>Modo Mutirão</span>
                 </span>
-                <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                <div className="mono" style={{ fontSize: 12, color: '#52525b', marginTop: 4 }}>
                   Lead {mutiraoIndex + 1} de {mutiraoLeads.length} na fila
                 </div>
               </div>
-              <button onClick={() => { setMutiraoActive(false); loadLeads(); loadSummary(); }} style={{ background: 'transparent', border: 'none', color: '#64748b', fontSize: 22, cursor: 'pointer' }}>×</button>
+              <button onClick={() => { setMutiraoActive(false); loadLeads(); loadSummary(); }} style={{ background: 'transparent', border: 'none', color: '#52525b', fontSize: 22, cursor: 'pointer' }}>✕</button>
             </div>
 
             {/* Conteúdo do Lead Ativo */}
@@ -399,9 +478,12 @@ export default function ProspectTab() {
               return (
                 <>
                   <div>
-                    <h3 style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9', marginBottom: 6 }}>{lead.name}</h3>
-                    <p style={{ fontSize: 13, color: '#94a3b8' }}>🏷️ {lead.category || 'Sem categoria'}</p>
-                    {lead.address && <p style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>📍 {lead.address}</p>}
+                    <h3 style={{ fontSize: 18, fontWeight: 700, color: '#fafafa', marginBottom: 6 }}>{lead.name}</h3>
+                    <p style={{ fontSize: 13, color: '#a1a1aa', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Tag size={12} color="#a1a1aa" />
+                      <span>{lead.category || 'Sem categoria'}</span>
+                    </p>
+                    {lead.address && <p style={{ fontSize: 12, color: '#52525b', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}><MapPin size={12} color="#52525b" /> <span>{lead.address}</span></p>}
                   </div>
 
                   {/* Botões de Ação */}
@@ -409,15 +491,17 @@ export default function ProspectTab() {
                     {waUrl ? (
                       <button onClick={() => window.open(waUrl, '_blank', 'noopener')}
                         style={{
-                          background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff',
-                          border: 'none', padding: '12px', borderRadius: 12, cursor: 'pointer',
+                          background: 'linear-gradient(135deg,#10b981,#059669)', color: '#fff',
+                          border: 'none', padding: '12px', borderRadius: 0, cursor: 'pointer',
                           fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
                         }}>
-                        💬 Abrir WhatsApp
+                        <MessageCircle size={15} />
+                        <span>Abrir WhatsApp</span>
                       </button>
                     ) : (
-                      <div style={{ textAlign: 'center', color: '#ef4444', fontSize: 13, padding: 8, background: 'rgba(239,68,68,0.08)', borderRadius: 10 }}>
-                        ⚠️ Este lead não possui telefone cadastrado.
+                      <div style={{ textAlign: 'center', color: '#ef4444', fontSize: 13, padding: 8, background: 'rgba(239,68,68,0.08)', borderRadius: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                        <AlertTriangle size={14} color="#ef4444" />
+                        <span>Este lead não possui telefone cadastrado.</span>
                       </div>
                     )}
 
@@ -440,24 +524,26 @@ export default function ProspectTab() {
                       }}
                         style={{
                           flex: 1, background: '#8b5cf6', color: '#fff', border: 'none',
-                          padding: '11px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600
+                          padding: '11px', borderRadius: 0, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
                         }}>
-                        📤 Marcar como Enviado
+                        <Send size={13} />
+                        <span>Marcar como Enviado</span>
                       </button>
 
                       <button onClick={() => {
                         if (mutiraoIndex + 1 < mutiraoLeads.length) {
                           setMutiraoIndex(prev => prev + 1);
                         } else {
-                          alert('Fim da fila do mutirão reached.');
+                          alert('Fim da fila do mutirão.');
                           setMutiraoActive(false);
                           loadLeads();
                           loadSummary();
                         }
                       }}
                         style={{
-                          background: '#1e293b', border: '1px solid #334155', color: '#94a3b8',
-                          padding: '11px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13
+                          background: '#18181b', border: '1px solid #27272a', color: '#a1a1aa',
+                          padding: '11px 16px', borderRadius: 0, cursor: 'pointer', fontSize: 13
                         }}>
                         Pular ➔
                       </button>
@@ -466,7 +552,7 @@ export default function ProspectTab() {
 
                   {/* Anotações no Mutirão */}
                   <div>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#52525b', marginBottom: 6, textTransform: 'uppercase' }}>
                       Anotações rápidas
                     </label>
                     <textarea
@@ -483,8 +569,8 @@ export default function ProspectTab() {
                       }}
                       rows={2}
                       style={{
-                        width: '100%', background: '#1e293b', border: '1px solid #334155', borderRadius: 10,
-                        padding: '8px 12px', color: '#f1f5f9', fontSize: 12, outline: 'none', resize: 'none', fontFamily: 'inherit'
+                        width: '100%', background: '#18181b', border: '1px solid #27272a', borderRadius: 0,
+                        padding: '8px 12px', color: '#fafafa', fontSize: 12, outline: 'none', resize: 'none', fontFamily: 'inherit'
                       }}
                     />
                   </div>

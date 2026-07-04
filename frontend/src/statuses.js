@@ -1,11 +1,12 @@
 // Funil de prospecção compartilhado por toda a aplicação
+// icon: nome do componente em Icons.js para renderização via <DynIcon name={icon} />
 export const STATUS_OPTIONS = [
-  { value: 'novo',       label: 'Novo',             emoji: '🔵', color: '#3b82f6' },
-  { value: 'fila',       label: 'Na fila',          emoji: '📌', color: '#f59e0b' },
-  { value: 'enviado',    label: 'Mensagem enviada', emoji: '📤', color: '#8b5cf6' },
-  { value: 'respondeu',  label: 'Respondeu',        emoji: '💬', color: '#22c55e' },
-  { value: 'fechado',    label: 'Cliente fechado',  emoji: '🏆', color: '#eab308' },
-  { value: 'descartado', label: 'Descartado',       emoji: '❌', color: '#ef4444' },
+  { value: 'novo',       label: 'Novo',             icon: 'CircleDot',     color: '#10b981' },
+  { value: 'fila',       label: 'Na fila',          icon: 'Pin',           color: '#f59e0b' },
+  { value: 'enviado',    label: 'Mensagem enviada', icon: 'Send',          color: '#8b5cf6' },
+  { value: 'respondeu',  label: 'Respondeu',        icon: 'MessageCircle', color: '#22c55e' },
+  { value: 'fechado',    label: 'Cliente fechado',  icon: 'Trophy',        color: '#eab308' },
+  { value: 'descartado', label: 'Descartado',       icon: 'XCircle',       color: '#ef4444' },
 ];
 
 export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]));
@@ -35,9 +36,9 @@ export function leadScore(lead) {
 }
 
 export function scoreBadge(score) {
-  if (score >= 70) return { label: 'Lead quente', emoji: '🔥', color: '#ef4444' };
-  if (score >= 45) return { label: 'Lead morno', emoji: '🌤️', color: '#f59e0b' };
-  return { label: 'Lead frio', emoji: '❄️', color: '#64748b' };
+  if (score >= 70) return { label: 'Lead quente', icon: 'Flame',     color: '#ef4444' };
+  if (score >= 45) return { label: 'Lead morno',  icon: 'Sun',       color: '#f59e0b' };
+  return                  { label: 'Lead frio',   icon: 'Snowflake', color: '#52525b' };
 }
 
 export function timeSince(dateStr) {
