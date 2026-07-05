@@ -1,11 +1,12 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Dashboard from './components/Dashboard';
 import SearchList from './components/SearchList';
 import ResultsTable from './components/ResultsTable';
 import ScraperTab from './components/ScraperTab';
 import ProspectTab from './components/ProspectTab';
-import { api } from './api';
-import { BarChart3, Search, FolderOpen, MessageCircle, Upload, ChevronLeft } from './components/Icons';
+import ApiConfigModal from './components/ApiConfigModal';
+import { api, getApiBase, isApiConfigured } from './api';
+import { BarChart3, Search, FolderOpen, MessageCircle, Upload, ChevronLeft, Plug } from './components/Icons';
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
@@ -23,7 +24,14 @@ export default function App() {
   const [selectedSearch, setSelectedSearch] = useState(null);
   const [uploading, setUploading]   = useState(false);
   const [uploadMsg, setUploadMsg]   = useState('');
+  const [showApiConfig, setShowApiConfig] = useState(false);
   const fileRef = useRef();
+
+  // Abre o modal automaticamente no primeiro acesso sem API configurada
+  // (típico do celular acessando o app via Vercel).
+  useEffect(() => {
+    if (!isApiConfigured()) setShowApiConfig(true);
+  }, []);
 
   function handleSelectSearch(s) {
     setSelectedSearch(s);
@@ -85,9 +93,15 @@ export default function App() {
           ))}
         </nav>
 
-        {/* Upload */}
+        {/* Upload + Config API */}
         <div className="upload-btn-container" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {uploadMsg && <span style={{ fontSize: 13, color: uploadMsg.includes('✅') ? '#10b981' : '#ef4444' }}>{uploadMsg}</span>}
+          <button
+            onClick={() => setShowApiConfig(true)}
+            title="Configurar URL da API (backend)"
+            style={{ background: 'transparent', color: '#a1a1aa', border: '1px solid #27272a', width: 38, height: 38, borderRadius: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Plug size={16} color="#a1a1aa" />
+          </button>
           <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleUpload} />
           <button
             onClick={() => fileRef.current?.click()}
@@ -153,8 +167,17 @@ export default function App() {
 
       {/* Footer */}
       <footer style={{ textAlign: 'center', padding: '16px 32px', borderTop: '1px solid #18181b', color: '#3f3f46', fontSize: 12, fontFamily: 'var(--font-mono)' }}>
-        Friendly Miner Dashboard — Backend: porta 5000 &nbsp;|&nbsp; Frontend: porta {window.location.port || '3005'}
+        Friendly Miner Dashboard — API:{' '}
+        <span
+          onClick={() => setShowApiConfig(true)}
+          title="Configurar URL da API"
+          style={{ color: '#52525b', cursor: 'pointer', textDecoration: 'underline dotted' }}
+        >
+          {getApiBase()}
+        </span>
       </footer>
+
+      {showApiConfig && <ApiConfigModal onClose={() => setShowApiConfig(false)} />}
     </div>
   );
 }

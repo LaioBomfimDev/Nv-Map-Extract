@@ -1,7 +1,66 @@
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+// ========================================
+// Cliente da API — URL dinâmica (localStorage)
+// Permite configurar o backend em runtime, útil para
+// acessar o app (deployado no Vercel/HTTPS) pelo celular
+// apontando para um túnel HTTPS (ngrok/localtunnel) ou,
+// em rede local HTTP, para o IP do computador.
+// ========================================
+
+const STORAGE_KEY = 'FM_API_URL';
+
+// Default embutido no build (definido em .env / .env.production).
+// Vazio em produção => força a configuração pelo modal.
+const ENV_DEFAULT = process.env.REACT_APP_API_URL || '';
+
+// Fallback final apenas para desenvolvimento local no PC.
+const LOCAL_DEFAULT = 'http://localhost:5000/api';
+
+// Remove barra final para evitar "//" ao concatenar paths.
+function normalize(url) {
+    return (url || '').trim().replace(/\/+$/, '');
+}
+
+export function getApiBase() {
+    const stored = normalize(localStorage.getItem(STORAGE_KEY));
+    if (stored) return stored;
+    if (ENV_DEFAULT) return normalize(ENV_DEFAULT);
+    return LOCAL_DEFAULT;
+}
+
+// True quando o usuário já configurou uma URL ou existe default embutido.
+// Usado para sugerir abrir o modal no mobile quando nada foi configurado.
+export function isApiConfigured() {
+    return !!normalize(localStorage.getItem(STORAGE_KEY)) || !!ENV_DEFAULT;
+}
+
+export function getStoredApiUrl() {
+    return normalize(localStorage.getItem(STORAGE_KEY));
+}
+
+export function setApiUrl(url) {
+    const clean = normalize(url);
+    if (clean) {
+        localStorage.setItem(STORAGE_KEY, clean);
+    } else {
+        localStorage.removeItem(STORAGE_KEY);
+    }
+    return clean;
+}
+
+// Detecta o clássico bloqueio de "mixed content": página servida em
+// HTTPS não consegue chamar um backend em http:// (o navegador bloqueia).
+export function isMixedContent(url) {
+    try {
+        const target = new URL(normalize(url));
+        return window.location.protocol === 'https:' && target.protocol === 'http:';
+    } catch {
+        return false;
+    }
+}
 
 async function request(path, options = {}) {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const base = getApiBase();
+    const res = await fetch(`${base}${path}`, {
         headers: { 'Content-Type': 'application/json' },
         ...options,
     });
@@ -25,7 +84,7 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ status })
     }),
-    getExportUrl:(id) => `${API_BASE}/export/${id}`,
+    getExportUrl:(id) => `${getApiBase()}/export/${id}`,
     startScraper: (data) => request('/scraper/start', {
         method: 'POST',
         body: JSON.stringify(data)
@@ -61,9 +120,18 @@ export const api = {
     getIgnored: () => request('/ignored'),
     restoreIgnored: (id) => request(`/ignored/${id}`, { method: 'DELETE' }),
     getHealth:   () => request('/health'),
+    // Ping usado pelo modal para validar a URL configurada.
+    ping: (baseOverride) => {
+        const base = baseOverride ? normalize(baseOverride) : getApiBase();
+        return fetch(`${base}/health`).then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        });
+    },
     uploadFile: (file) => {
+        const base = getApiBase();
         const form = new FormData();
         form.append('file', file);
-        return fetch(`${API_BASE}/upload`, { method: 'POST', body: form }).then(r => r.json());
+        return fetch(`${base}/upload`, { method: 'POST', body: form }).then(r => r.json());
     },
 };
