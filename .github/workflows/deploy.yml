@@ -1,4 +1,7 @@
-name: Deploy to Vercel
+# A publicacao em producao e feita pela integracao nativa da Vercel com o
+# repositorio. Este workflow apenas valida o codigo (instala, lint, testa
+# e builda o frontend) a cada push/PR.
+name: CI
 
 on:
   push:
@@ -60,20 +63,3 @@ jobs:
         REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
         REACT_APP_NAME: Friendly Miner Dashboard
         REACT_APP_VERSION: 1.0.0
-
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Deploy to Vercel
-      uses: amondnet/vercel-action@v25
-      with:
-        vercel-token: ${{ secrets.VERCEL_TOKEN }}
-        vercel-org-id: ${{ secrets.ORG_ID }}
-        vercel-project-id: ${{ secrets.PROJECT_ID }}
-        vercel-args: '--prod'
-        working-directory: ./
