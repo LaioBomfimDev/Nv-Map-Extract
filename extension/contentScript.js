@@ -7,6 +7,8 @@ var auto_extract_flag = false;
 var leads = [];
 var leads_lnglat = new Set();
 var collect_email = true;
+// Captura AGORA se a busca foi disparada pelo site (o Maps reescreve a URL depois).
+var fmAutoMode = (location.hash || '').includes('fm_auto');
 
 // ——— Criar interface flutuante ———————————————————————————————————
 (function () {
@@ -169,7 +171,7 @@ var collect_email = true;
         if (leads.length > 0) {
             setStatus(`⏳ Enriquecendo e enviando ${leads.length} leads...`, 'info');
             await sleep(6000); // dá tempo do enriquecimento de e-mail/redes assentar
-            await doSend({ auto: window.location.hash.includes('fm_auto') });
+            await doSend({ auto: fmAutoMode });
         }
     });
 
@@ -242,7 +244,7 @@ var collect_email = true;
     window._mse_updateCount = updateCount;
 
     // Início AUTOMÁTICO quando a busca é disparada pelo site (janela pop-up com #fm_auto).
-    if (window.location.hash.includes('fm_auto')) {
+    if (fmAutoMode) {
         (async () => {
             await sleep(3500); // espera o painel do Maps carregar
             if (!auto_extract_flag) btnStart.click();
