@@ -12,6 +12,14 @@
     "content_scripts": [
         {
             "matches": [
+                "https://mapssearch-dashboard.vercel.app/*",
+                "http://localhost:3008/*"
+            ],
+            "js": ["authBridge.js"],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
                 "https://www.google.com/maps/*",
                 "https://www.google.com.br/maps/*",
                 "https://www.google.ad/maps/*",

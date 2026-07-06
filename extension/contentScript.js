@@ -156,35 +156,59 @@ var collect_email = true;
         auto_extract_flag = false;
         btnStart.innerHTML = '▶ Iniciar Extração';
         btnStart.classList.remove('mse_btn_stop');
+
+        // Rede de segurança: se a interceptação não trouxe nada, lê direto da tela.
+        if (leads.length === 0) {
+            setStatus('🔎 Interceptação vazia — tentando captura direta da tela...', 'info');
+            const n = ingestLeads(extractFromDOM());
+            console.log(`[MSE] Fallback DOM: +${n} leads.`);
+            updateCount(leads.length);
+        }
+
+        // Envio AUTOMÁTICO ao terminar (sem precisar clicar em "Enviar").
+        if (leads.length > 0) {
+            setStatus(`⏳ Enriquecendo e enviando ${leads.length} leads...`, 'info');
+            await sleep(6000); // dá tempo do enriquecimento de e-mail/redes assentar
+            await doSend({ auto: window.location.hash.includes('fm_auto') });
+        }
     });
 
-    // ENVIAR AO DASHBOARD
-    btnSend.addEventListener('click', async () => {
+    // ENVIAR AO DASHBOARD (manual — o envio já é automático ao terminar a extração)
+    btnSend.addEventListener('click', () => doSend({ auto: false }));
+
+    // Envia os leads ao painel (Supabase, via bg.js). Reutilizado pelo auto-envio.
+    async function doSend({ auto = false } = {}) {
         if (leads.length === 0) {
             setStatus('⚠️ Nenhum lead para enviar.', 'warning');
             return;
         }
-
         setStatus(`📤 Enviando ${leads.length} leads para o Dashboard...`, 'info');
         btnSend.disabled = true;
 
         const searchInput = document.querySelector('input[aria-label]');
-        const keyword = searchInput?.value || document.title || 'maps_search';
-        const urlMatch = window.location.href.match(/search\/([^/]+)/);
-        const searchTerm = urlMatch ? decodeURIComponent(urlMatch[1]) : keyword;
+        const kw = searchInput?.value || document.title || 'maps_search';
+        const urlMatch = window.location.href.match(/search\/([^/?#]+)/);
+        const searchTerm = urlMatch ? decodeURIComponent(urlMatch[1]).replace(/\+/g, ' ') : kw;
 
-        chrome.runtime.sendMessage({
-            action: 'sendToDashboard',
-            data: { leads, keyword: searchTerm, city: '' },
-        }, (response) => {
-            btnSend.disabled = false;
-            if (response?.success) {
-                setStatus(`✅ ${leads.length} leads enviados com sucesso!`, 'success');
-            } else {
-                setStatus(`❌ Falha: ${response?.message || 'Erro de conexão'}`, 'error');
-            }
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+                action: 'sendToDashboard',
+                data: { leads, keyword: searchTerm, city: '' },
+            }, (response) => {
+                btnSend.disabled = false;
+                if (response?.success) {
+                    setStatus(`✅ ${response.message || leads.length + ' leads enviados!'}`, 'success');
+                } else {
+                    setStatus(`❌ Falha: ${response?.message || 'Erro de conexão'}`, 'error');
+                }
+                // Fluxo automático (janela pop-up disparada pelo site): fechar a janela.
+                if (auto) {
+                    try { chrome.runtime.sendMessage({ action: 'fmSearchDone', ok: !!(response && response.success) }); } catch (_) {}
+                }
+                resolve(response);
+            });
         });
-    });
+    }
 
     // EXPORTAR CSV
     btnExport.addEventListener('click', () => {
@@ -216,6 +240,20 @@ var collect_email = true;
     }
 
     window._mse_updateCount = updateCount;
+
+    // Início AUTOMÁTICO quando a busca é disparada pelo site (janela pop-up com #fm_auto).
+    if (window.location.hash.includes('fm_auto')) {
+        (async () => {
+            await sleep(3500); // espera o painel do Maps carregar
+            if (!auto_extract_flag) btnStart.click();
+        })();
+    }
+
+    // Comando vindo do bg.js (site → bg → aqui) para iniciar a extração.
+    chrome.runtime.onMessage.addListener((msg) => {
+        if (msg && msg.action === 'fmAutoExtract' && !auto_extract_flag) btnStart.click();
+        return false;
+    });
 })();
 
 // ——— Helpers de extração de emails e redes sociais ——————————————————
@@ -287,82 +325,118 @@ function findFeedArray(obj) {
     return null;
 }
 
-// ——— Listener de mensagens do Google Maps (XHR interceptado) ————
-window.addEventListener('message', async function (event) {
-    if (!event.data || event.data.type !== 'search' || !event.data.data) return;
-
+// ——— Parser tolerante das respostas /search (cobre formatos diferentes) ———
+function parseSearchPayload(text) {
+    // Formato A: /*""*/{"d":")]}'\n[...]"}
     try {
-        const raw = JSON.parse(event.data.data.replace('/*""*/', ''));
-        const results = JSON.parse(raw.d.slice(5));
-        
-        // Localização inteligente e dinâmica do feed (Evita falhas se Google mudar índices do JSON)
-        const feed = findFeedArray(results);
-        if (!feed) {
-            console.warn('[MSE] Array de estabelecimentos não encontrado no payload de resposta.');
-            return;
+        const obj = JSON.parse(text.replace('/*""*/', ''));
+        if (obj && typeof obj.d === 'string') {
+            const i = obj.d.indexOf('[');
+            if (i >= 0) return JSON.parse(obj.d.slice(i));
         }
+    } catch (_) {}
+    // Formato B: )]}'\n[...]  (resposta direta, sem embrulho)
+    try {
+        const i = text.indexOf('[');
+        if (i >= 0) return JSON.parse(text.slice(i));
+    } catch (_) {}
+    return null;
+}
 
-        const newLeads = [];
-        for (let k = 0; k < feed.length; k++) {
-            try {
-                const e = feed[k][feed[k].length - 1];
-                if (!e || !Array.isArray(e)) continue;
-
-                const placeID = e[78] || '';
-                if (!placeID || leads_lnglat.has(placeID)) continue;
-
-                let name = ''; try { name = e[11] || ''; } catch (_) {}
-                if (!name) continue;
-
-                let website = '';    try { website = e[7][0] || ''; } catch (_) {}
-                let phone = '';      try { phone = e[178][0][0] || ''; } catch (_) {}
-                let reviewCount = 0; try { reviewCount = e[4][8] || 0; } catch (_) {}
-                let avgRating = 0;   try { avgRating = e[4][7] || 0; } catch (_) {}
-                let category = '';   try { category = (e[13] || []).join('; ') || ''; } catch (_) {}
-                let cID = '';        try { cID = e[37][0][0][29][1] || ''; } catch (_) {}
-                let address = '';    try { address = (e[2] || []).join(', ') || ''; } catch (_) {}
-                let lat = 0;         try { lat = e[9][2] || 0; } catch (_) {}
-                let lng = 0;         try { lng = e[9][3] || 0; } catch (_) {}
-
-                leads_lnglat.add(placeID);
-                newLeads.push({
-                    name, phone, website, address, email: '',
-                    placeID, cID, category, reviewCount, averageRating: avgRating,
-                    latitude: lat, longitude: lng,
-                    instagram: '', facebook: '', linkedin: '', twitter: '', youtube: '',
-                });
-            } catch (err) {
-                console.warn('[MSE] Erro ao processar estabelecimento individual:', err);
-            }
-        }
-
-        if (newLeads.length === 0) return;
-
-        // Inserir leads imediatamente para feedback visual instantâneo na interface
-        newLeads.forEach(l => leads.push(l));
-        if (window._mse_updateCount) window._mse_updateCount(leads.length);
-
-        // Enriquecer com e-mails em segundo plano sem bloquear a interface de extração
-        newLeads.forEach(async (lead) => {
+// ——— Adiciona leads (dedup) e dispara enriquecimento de e-mail/redes ———
+function ingestLeads(newLeads) {
+    if (!newLeads || !newLeads.length) return 0;
+    let added = 0;
+    for (const lead of newLeads) {
+        const key = lead.placeID || (lead.name + '|' + lead.address);
+        if (!key || leads_lnglat.has(key)) continue;
+        leads_lnglat.add(key);
+        leads.push(lead);
+        added++;
+        (async () => {
             try {
                 if (lead.website && collect_email) {
-                    const d = await chrome.runtime.sendMessage({
-                        action: 'email',
-                        data: { website: lead.website, name: lead.name, deep_search: true },
-                    });
+                    const d = await chrome.runtime.sendMessage({ action: 'email', data: { website: lead.website, name: lead.name, deep_search: true } });
                     if (d) {
-                        const idx = leads.findIndex(l => l.placeID === lead.placeID);
-                        if (idx !== -1) {
-                            for (const k in d) {
-                                leads[idx][k] = Array.isArray(d[k]) ? d[k].join(', ') : d[k];
-                            }
-                        }
+                        const idx = leads.findIndex(l => (l.placeID || '') === (lead.placeID || '') && l.name === lead.name);
+                        if (idx !== -1) for (const k in d) leads[idx][k] = Array.isArray(d[k]) ? d[k].join(', ') : d[k];
                     }
                 }
             } catch (_) {}
-        });
-
-    } catch (err) {
-        console.warn('[MSE] Erro ao processar mensagem XHR interceptada:', err);
+        })();
     }
+    if (added && window._mse_updateCount) window._mse_updateCount(leads.length);
+    return added;
+}
+
+// ——— Rede de segurança: captura direto do DOM se a interceptação vier vazia ———
+function extractFromDOM() {
+    const out = [];
+    const seen = new Set();
+    document.querySelectorAll('div[role="feed"] a[href*="/maps/place/"], a.hfpxzc').forEach((a) => {
+        const name = (a.getAttribute('aria-label') || '').trim();
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        const card = a.closest('div[jsaction]') || a.parentElement;
+        let phone = '', website = '', category = '', rating = 0;
+        if (card) {
+            const txt = card.innerText || '';
+            const ph = txt.match(/(?:\(?\d{2}\)?[\s-]?)?\d{4,5}[\s-]\d{4}/);
+            if (ph) phone = ph[0];
+            const site = card.querySelector('a[data-value="Website"], a[href^="http"]:not([href*="google."]):not([href*="maps."])');
+            if (site) website = site.href;
+            const rt = card.querySelector('.MW4etd');
+            if (rt) rating = parseFloat((rt.textContent || '').replace(',', '.')) || 0;
+        }
+        out.push({ name, phone, website, address: '', email: '', placeID: '', cID: '', category, reviewCount: 0, averageRating: rating, latitude: 0, longitude: 0, instagram: '', facebook: '', linkedin: '', twitter: '', youtube: '' });
+    });
+    return out;
+}
+
+// ——— Listener das respostas do Google Maps (XHR + fetch interceptados) ———
+window.addEventListener('message', function (event) {
+    if (!event.data || event.data.type !== 'search' || !event.data.data) return;
+
+    const results = parseSearchPayload(event.data.data);
+    if (!results) { console.warn('[MSE] Resposta /search recebida, mas formato não reconhecido.'); return; }
+
+    const feed = findFeedArray(results);
+    if (!feed) { console.warn('[MSE] Feed de estabelecimentos não localizado no payload.'); return; }
+    console.log(`[MSE] Feed interceptado: ${feed.length} itens.`);
+
+    const newLeads = [];
+    for (let k = 0; k < feed.length; k++) {
+        try {
+            const e = feed[k][feed[k].length - 1];
+            if (!e || !Array.isArray(e)) continue;
+
+            const placeID = e[78] || '';
+            if (!placeID) continue;
+
+            let name = ''; try { name = e[11] || ''; } catch (_) {}
+            if (!name) continue;
+
+            let website = '';    try { website = e[7][0] || ''; } catch (_) {}
+            let phone = '';      try { phone = e[178][0][0] || ''; } catch (_) {}
+            let reviewCount = 0; try { reviewCount = e[4][8] || 0; } catch (_) {}
+            let avgRating = 0;   try { avgRating = e[4][7] || 0; } catch (_) {}
+            let category = '';   try { category = (e[13] || []).join('; ') || ''; } catch (_) {}
+            let cID = '';        try { cID = e[37][0][0][29][1] || ''; } catch (_) {}
+            let address = '';    try { address = (e[2] || []).join(', ') || ''; } catch (_) {}
+            let lat = 0;         try { lat = e[9][2] || 0; } catch (_) {}
+            let lng = 0;         try { lng = e[9][3] || 0; } catch (_) {}
+
+            newLeads.push({
+                name, phone, website, address, email: '',
+                placeID, cID, category, reviewCount, averageRating: avgRating,
+                latitude: lat, longitude: lng,
+                instagram: '', facebook: '', linkedin: '', twitter: '', youtube: '',
+            });
+        } catch (err) {
+            console.warn('[MSE] Erro ao processar estabelecimento individual:', err);
+        }
+    }
+
+    const added = ingestLeads(newLeads);
+    console.log(`[MSE] +${added} novos leads (total: ${leads.length}).`);
 });

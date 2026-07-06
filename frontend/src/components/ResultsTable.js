@@ -231,9 +231,8 @@ export default function ResultsTable({ search }) {
                         <MapIcon size={14} color={showMap ? '#06b6d4' : '#a1a1aa'} />
                         {showMap ? 'Ocultar Mapa' : 'Mostrar no Mapa'}
                     </button>
-                    <a
-                        href={api.getExportUrl(search.id)}
-                        download
+                    <button
+                        onClick={() => api.exportSearch(search.id, filters)}
                         style={{
                             background: 'linear-gradient(135deg,#10b981,#059669)', color: '#fff', border: 'none',
                             padding: '8px 18px', borderRadius: 0, cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -242,7 +241,7 @@ export default function ResultsTable({ search }) {
                     >
                         <Download size={14} />
                         <span>Exportar CSV</span>
-                    </a>
+                    </button>
                 </div>
             </div>
 

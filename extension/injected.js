@@ -1,30 +1,54 @@
-(function (proto) {
-    const origOpen = proto.open;
-    const origSend = proto.send;
+// ================================================================
+// MAPS SEARCH EXTRACTOR — Interceptador (contexto da página)
+// Escuta as respostas do endpoint /search do Google Maps.
+// Precisa cobrir XHR *e* fetch: buscas grandes usam XHR na paginação,
+// mas buscas pequenas (1–2 resultados) chegam via fetch no carregamento.
+// ================================================================
+(function () {
 
-    proto.open = function (method, url) {
-        this._mse_method = method;
-        this._mse_url    = url;
-        return origOpen.apply(this, arguments);
-    };
+    function isSearchUrl(url) {
+        return typeof url === 'string' && url.includes('/search');
+    }
 
-    proto.send = function (body) {
-        const events = 'loadstart load loadend progress error abort timeout readystatechange'.split(' ');
-        events.forEach(evt => {
-            this.addEventListener(evt, function () {
-                if (
-                    this._mse_url &&
-                    (this._mse_url.includes('/search') || this._mse_url.startsWith('/search')) &&
-                    this.readyState === 4
-                ) {
-                    try {
-                        window.postMessage({ type: 'search', data: this.response }, '*');
-                    } catch (e) {
-                        console.error('[MSE] Erro ao postar resposta XHR:', e);
-                    }
+    function emit(text) {
+        try { window.postMessage({ type: 'search', data: text }, '*'); }
+        catch (e) { console.error('[MSE] Erro ao postar resposta:', e); }
+    }
+
+    // ——— Hook de XMLHttpRequest ————————————————————————————————————
+    (function (proto) {
+        const origOpen = proto.open;
+        const origSend = proto.send;
+
+        proto.open = function (method, url) {
+            this._mse_url = url;
+            return origOpen.apply(this, arguments);
+        };
+
+        proto.send = function (body) {
+            this.addEventListener('readystatechange', function () {
+                if (this.readyState === 4 && isSearchUrl(this._mse_url)) {
+                    emit(this.response);
                 }
             });
-        });
-        return origSend.apply(this, arguments);
-    };
-})(XMLHttpRequest.prototype);
+            return origSend.apply(this, arguments);
+        };
+    })(XMLHttpRequest.prototype);
+
+    // ——— Hook de fetch ————————————————————————————————————————————
+    const origFetch = window.fetch;
+    if (typeof origFetch === 'function') {
+        window.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : (input && input.url) || '';
+            const promise = origFetch.apply(this, arguments);
+            if (isSearchUrl(url)) {
+                promise.then((res) => {
+                    try { res.clone().text().then(emit).catch(() => {}); } catch (e) {}
+                }).catch(() => {});
+            }
+            return promise;
+        };
+    }
+
+    console.log('[Maps Search Extractor] Interceptador (XHR + fetch) ativo.');
+})();

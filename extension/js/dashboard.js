@@ -91,26 +91,21 @@ document.getElementById('btnSend').addEventListener('click', async () => {
     const data = filtered.length ? filtered : allLeads;
     if (!data.length) return setStatus('⚠️ Nenhum lead para enviar.');
 
-    setStatus(`📤 Enviando ${data.length} leads...`);
+    setStatus(`📤 Enviando ${data.length} leads para a nuvem...`);
     document.getElementById('btnSend').disabled = true;
 
-    const { dashboardUrl = DEFAULT_URL } = await getConfig();
-    const timestamp = new Date().toISOString().slice(0, 16).replace('T', '_').replace(/:/g, '-');
-    const filename  = `extensao_maps_${timestamp}`;
-
-    try {
-        const res  = await fetch(`${dashboardUrl}/upload-direct`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ leads: data, filename }),
-        });
-        const json = await res.json();
-        setStatus(json.success ? `✅ ${data.length} leads enviados ao Dashboard!` : `❌ Falha: ${json.message}`);
-    } catch (e) {
-        setStatus('❌ Não foi possível conectar ao Dashboard. Verifique se o backend está rodando.');
-    }
-
-    document.getElementById('btnSend').disabled = false;
+    // Envia via service worker (bg.js) → Supabase, em nome do usuário logado.
+    chrome.runtime.sendMessage(
+        { action: 'sendToDashboard', data: { leads: data, keyword: 'maps', city: '' } },
+        (response) => {
+            document.getElementById('btnSend').disabled = false;
+            if (response?.success) {
+                setStatus(`✅ ${response.message || `${data.length} leads enviados!`}`);
+            } else {
+                setStatus(`❌ Falha: ${response?.message || 'Erro ao enviar'}`);
+            }
+        }
+    );
 });
 
 // ——— Exportar CSV ————————————————————————————————————————————

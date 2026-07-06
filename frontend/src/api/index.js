@@ -1,137 +1,205 @@
-// ========================================
-// Cliente da API — URL dinâmica (localStorage)
-// Permite configurar o backend em runtime, útil para
-// acessar o app (deployado no Vercel/HTTPS) pelo celular
-// apontando para um túnel HTTPS (ngrok/localtunnel) ou,
-// em rede local HTTP, para o IP do computador.
-// ========================================
+// ============================================================================
+// Camada de API — agora sobre o SUPABASE (sem backend Node).
+// Mantém o MESMO formato de resposta que os componentes já consomem:
+//   leituras -> { success, data }
+//   listas paginadas -> { success, data: { data, total, page, limit } }
+//   mutações -> { success, message }
+// Os componentes React NÃO precisam mudar.
+// ============================================================================
+import { supabase } from '../supabaseClient';
 
-const STORAGE_KEY = 'FM_API_URL';
+// Aplica os filtros do frontend (buildResultFilters do backend antigo) numa
+// query do supabase-js. Cada .or() adicional é combinado com AND.
+function applyFilters(q, filters = {}) {
+  if (!filters) return q;
+  if (filters.name)     q = q.ilike('name', `%${filters.name}%`);
+  if (filters.category) q = q.ilike('category', `%${filters.category}%`);
+  if (filters.city)     q = q.ilike('address', `%${filters.city}%`);
+  if (filters.prospect_status) q = q.eq('prospect_status', filters.prospect_status);
 
-// Default embutido no build (definido em .env / .env.production).
-// Vazio em produção => força a configuração pelo modal.
-const ENV_DEFAULT = process.env.REACT_APP_API_URL || '';
+  const hasField = (col, v) => {
+    if (v === '1') q = q.not(col, 'is', null).neq(col, '').neq(col, '—');
+    else if (v === '0') q = q.or(`${col}.is.null,${col}.eq.,${col}.eq.—`);
+  };
+  hasField('website', filters.has_website);
+  hasField('email',   filters.has_email);
+  hasField('phone',   filters.has_phone);
 
-// Fallback final apenas para desenvolvimento local no PC.
-const LOCAL_DEFAULT = 'http://localhost:5000/api';
-
-// Remove barra final para evitar "//" ao concatenar paths.
-function normalize(url) {
-    return (url || '').trim().replace(/\/+$/, '');
-}
-
-export function getApiBase() {
-    const stored = normalize(localStorage.getItem(STORAGE_KEY));
-    if (stored) return stored;
-    if (ENV_DEFAULT) return normalize(ENV_DEFAULT);
-    return LOCAL_DEFAULT;
-}
-
-// True quando o usuário já configurou uma URL ou existe default embutido.
-// Usado para sugerir abrir o modal no mobile quando nada foi configurado.
-export function isApiConfigured() {
-    return !!normalize(localStorage.getItem(STORAGE_KEY)) || !!ENV_DEFAULT;
-}
-
-export function getStoredApiUrl() {
-    return normalize(localStorage.getItem(STORAGE_KEY));
-}
-
-export function setApiUrl(url) {
-    const clean = normalize(url);
-    if (clean) {
-        localStorage.setItem(STORAGE_KEY, clean);
-    } else {
-        localStorage.removeItem(STORAGE_KEY);
-    }
-    return clean;
-}
-
-// Detecta o clássico bloqueio de "mixed content": página servida em
-// HTTPS não consegue chamar um backend em http:// (o navegador bloqueia).
-export function isMixedContent(url) {
-    try {
-        const target = new URL(normalize(url));
-        return window.location.protocol === 'https:' && target.protocol === 'http:';
-    } catch {
-        return false;
-    }
-}
-
-async function request(path, options = {}) {
-    const base = getApiBase();
-    const res = await fetch(`${base}${path}`, {
-        headers: { 'Content-Type': 'application/json' },
-        ...options,
+  if (filters.no_social === '1') {
+    ['instagram', 'facebook', 'linkedin', 'twitter', 'youtube'].forEach(col => {
+      q = q.or(`${col}.is.null,${col}.eq.`);
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+  }
+
+  if (filters.min_rating)  q = q.gte('rating', parseFloat(filters.min_rating));
+  if (filters.max_rating)  q = q.lte('rating', parseFloat(filters.max_rating));
+  if (filters.min_reviews) q = q.gte('reviews_count', parseInt(filters.min_reviews));
+  if (filters.max_reviews) q = q.lte('reviews_count', parseInt(filters.max_reviews));
+  return q;
+}
+
+function rangeOf(page, limit) {
+  const from = (page - 1) * limit;
+  return { from, to: from + limit - 1 };
+}
+
+// Achata o objeto aninhado `searches` (join) em campos search_* planos.
+function flattenLead(row) {
+  if (row && row.searches) {
+    row.search_filename = row.searches.filename;
+    row.search_keyword  = row.searches.keyword;
+    row.search_city     = row.searches.city;
+    delete row.searches;
+  }
+  return row;
+}
+
+// Dispara download de um CSV a partir de linhas já carregadas.
+function downloadCsv(filename, rows) {
+  const cols = ['name', 'phone', 'website', 'email', 'address', 'category', 'rating',
+    'reviews_count', 'instagram', 'facebook', 'linkedin', 'twitter', 'youtube',
+    'prospect_status', 'latitude', 'longitude', 'place_id'];
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const head = cols.join(',');
+  const body = rows.map(r => cols.map(c => esc(r[c])).join(',')).join('\n');
+  const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${filename}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export const api = {
-    getMetrics:  () => request('/dashboard/metrics'),
-    getCharts:   () => request('/dashboard/charts'),
-    getSearches: () => request('/searches'),
-    getResults:  (id, page = 1, limit = 50, filters = {}) => {
-        const query = new URLSearchParams({
-            page,
-            limit,
-            filters: JSON.stringify(filters)
-        }).toString();
-        return request(`/results/${id}?${query}`);
-    },
-    updateResultStatus: (id, status) => request(`/results/${id}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status })
-    }),
-    getExportUrl:(id) => `${getApiBase()}/export/${id}`,
-    startScraper: (data) => request('/scraper/start', {
-        method: 'POST',
-        body: JSON.stringify(data)
-    }),
-    stopScraper: () => request('/scraper/stop', { method: 'POST' }),
-    getScraperStatus: () => request('/scraper/status'),
-    deleteSearch: (id) => request(`/searches/${id}`, { method: 'DELETE' }),
-    renameSearch: (id, filename) => request(`/searches/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ filename })
-    }),
-    getAllLeads: (page = 1, limit = 50, filters = {}) => {
-        const query = new URLSearchParams({
-            page,
-            limit,
-            filters: JSON.stringify(filters)
-        }).toString();
-        return request(`/leads?${query}`);
-    },
-    updateLead: (id, data) => request(`/results/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify(data)
-    }),
-    bulkStatus: (ids, status) => request('/results/bulk-status', {
-        method: 'POST',
-        body: JSON.stringify({ ids, status })
-    }),
-    bulkDelete: (ids) => request('/results/bulk-delete', {
-        method: 'POST',
-        body: JSON.stringify({ ids })
-    }),
-    getProspectSummary: () => request('/prospect/summary'),
-    getIgnored: () => request('/ignored'),
-    restoreIgnored: (id) => request(`/ignored/${id}`, { method: 'DELETE' }),
-    getHealth:   () => request('/health'),
-    // Ping usado pelo modal para validar a URL configurada.
-    ping: (baseOverride) => {
-        const base = baseOverride ? normalize(baseOverride) : getApiBase();
-        return fetch(`${base}/health`).then(r => {
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r.json();
-        });
-    },
-    uploadFile: (file) => {
-        const base = getApiBase();
-        const form = new FormData();
-        form.append('file', file);
-        return fetch(`${base}/upload`, { method: 'POST', body: form }).then(r => r.json());
-    },
+  // ── Dashboard ─────────────────────────────────────────────────────────────
+  getMetrics: async () => {
+    const { data, error } = await supabase.rpc('dashboard_metrics');
+    if (error) throw error;
+    return { success: true, data };
+  },
+  getCharts: async () => {
+    const { data, error } = await supabase.rpc('dashboard_charts');
+    if (error) throw error;
+    return { success: true, data };
+  },
+
+  // ── Buscas (importações) ──────────────────────────────────────────────────
+  getSearches: async () => {
+    const { data, error } = await supabase
+      .from('searches').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  },
+  deleteSearch: async (id) => {
+    // Apaga a busca inteira do histórico. Mantém os leads já trabalhados
+    // (status != 'novo') e remove o resto — sem deixar "fantasma" no histórico.
+    const { data, error } = await supabase.rpc('delete_search_smart', { p_search_id: id });
+    if (error) throw error;
+    return { success: true, data };
+  },
+  renameSearch: async (id, filename) => {
+    const { error } = await supabase.from('searches').update({ filename }).eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  },
+
+  // ── Resultados de uma busca ───────────────────────────────────────────────
+  getResults: async (id, page = 1, limit = 50, filters = {}) => {
+    const { from, to } = rangeOf(page, limit);
+    let q = supabase.from('results').select('*', { count: 'exact' }).eq('search_id', id);
+    q = applyFilters(q, filters).order('created_at', { ascending: false }).range(from, to);
+    const { data, count, error } = await q;
+    if (error) throw error;
+    return { success: true, data: { data: data || [], total: count || 0, page, limit } };
+  },
+
+  // ── Base unificada de leads ───────────────────────────────────────────────
+  getAllLeads: async (page = 1, limit = 50, filters = {}) => {
+    const { from, to } = rangeOf(page, limit);
+    let q = supabase
+      .from('results')
+      .select('*, searches(filename,keyword,city)', { count: 'exact' });
+    q = applyFilters(q, filters).order('created_at', { ascending: false }).range(from, to);
+    const { data, count, error } = await q;
+    if (error) throw error;
+    return { success: true, data: { data: (data || []).map(flattenLead), total: count || 0, page, limit } };
+  },
+
+  // ── Mutações de lead ──────────────────────────────────────────────────────
+  updateResultStatus: async (id, status) => {
+    const patch = { prospect_status: status };
+    if (status === 'enviado') patch.last_contact_at = new Date().toISOString();
+    const { error } = await supabase.from('results').update(patch).eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  },
+  updateLead: async (id, data) => {
+    const patch = {};
+    if (data.status !== undefined) {
+      patch.prospect_status = data.status;
+      if (data.status === 'enviado') patch.last_contact_at = new Date().toISOString();
+    }
+    if (data.notes !== undefined) patch.notes = data.notes;
+    if (!Object.keys(patch).length) return { success: true };
+    const { error } = await supabase.from('results').update(patch).eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  },
+  bulkStatus: async (ids, status) => {
+    const patch = { prospect_status: status };
+    if (status === 'enviado') patch.last_contact_at = new Date().toISOString();
+    const { error } = await supabase.from('results').update(patch).in('id', ids);
+    if (error) throw error;
+    return { success: true, changed: ids.length };
+  },
+  bulkDelete: async (ids) => {
+    const { data, error } = await supabase.rpc('delete_results', { p_ids: ids });
+    if (error) throw error;
+    return { success: true, deleted: data || 0 };
+  },
+
+  // ── Prospecção ────────────────────────────────────────────────────────────
+  getProspectSummary: async () => {
+    const { data, error } = await supabase.rpc('prospect_summary');
+    if (error) throw error;
+    return { success: true, data };
+  },
+  getIgnored: async () => {
+    const { data, error } = await supabase
+      .from('ignored_leads').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  },
+  restoreIgnored: async (id) => {
+    const { error } = await supabase.from('ignored_leads').delete().eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  },
+
+  // ── Exportação CSV (client-side) ──────────────────────────────────────────
+  // Substitui o antigo href de download do backend. Chamado no onClick.
+  exportSearch: async (searchId, filters = {}) => {
+    let q = supabase.from('results').select('*').eq('search_id', searchId);
+    q = applyFilters(q, filters).order('created_at', { ascending: false }).limit(5000);
+    const { data, error } = await q;
+    if (error) throw error;
+    downloadCsv(`leads_${searchId}`, data || []);
+    return { success: true };
+  },
+
+  // ── Importação manual (CSV/planilha) ──────────────────────────────────────
+  // Usa a mesma função de dedup/merge do Supabase que a extensão usa.
+  importLeads: async (keyword, city, leads) => {
+    const { data, error } = await supabase.rpc('import_leads', {
+      p_keyword: keyword || 'planilha', p_city: city || '', p_leads: leads,
+    });
+    if (error) throw error;
+    return { success: true, data };
+  },
+
+  // ── Health/compat ─────────────────────────────────────────────────────────
+  getHealth: async () => {
+    const { error } = await supabase.from('searches').select('id').limit(1);
+    return { success: !error };
+  },
 };

@@ -16,6 +16,12 @@ dist/
 .env.test.local
 .env.production.local
 
+# Segredos da extensão (a chave real fica só local; use config.example.js)
+extension/config.js
+
+# Ferramentas de agente
+.agents/
+
 # Database
 *.db
 *.db-journal

@@ -19,12 +19,16 @@ export default function SearchList({ onSelectSearch, selectedId, onDeleted }) {
 
     async function handleDelete(e, s) {
         e.stopPropagation();
-        if (!window.confirm(`Apagar "${s.filename}" e todos os seus ${s.total_results || 0} leads?`)) return;
+        if (!window.confirm(
+            `Apagar a busca "${s.filename}" do histórico?\n\n` +
+            `Os leads NÃO trabalhados (status "novo") serão excluídos. ` +
+            `Os que você já moveu na prospecção continuam salvos.`
+        )) return;
         try {
             await api.deleteSearch(s.id);
             setSearches(prev => prev.filter(x => x.id !== s.id));
             onDeleted?.(s.id);
-        } catch { /* backend indisponível */ }
+        } catch { /* falha ao apagar */ }
     }
 
     function startRename(e, s) {

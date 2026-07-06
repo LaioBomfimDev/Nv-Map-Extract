@@ -32,29 +32,18 @@
 
         <hr class="divider" />
 
-        <!-- Status do Dashboard -->
+        <!-- Status da conta -->
         <div>
-            <div class="section-label">⚡ Status do Dashboard</div>
+            <div class="section-label">👤 Sua conta</div>
             <div class="status-indicator">
                 <div class="status-dot" id="statusDot"></div>
-                <span id="statusText">Verificando conexão...</span>
+                <span id="statusText">Verificando...</span>
             </div>
-        </div>
-
-        <hr class="divider" />
-
-        <!-- Configuração de URL -->
-        <div class="input-group">
-            <div class="section-label">⚙️ URL do Backend</div>
-            <input
-                type="text"
-                id="dashboardUrl"
-                class="input-field"
-                placeholder="http://localhost:5000/api"
-            />
-            <div class="url-hint">Padrão: http://localhost:5000/api</div>
-            <button id="btnSave" class="btn-save">💾 Salvar URL</button>
-            <div id="savedMsg" class="saved-msg"></div>
+            <button id="btnPanel" class="btn-save" style="margin-top:10px;">🌐 Abrir Painel / Entrar</button>
+            <div class="url-hint" id="loginHint" style="margin-top:8px;">
+                Faça login no painel uma vez. Depois é só minerar no Maps que os leads
+                vão direto para a sua conta.
+            </div>
         </div>
 
     </div>
@@ -63,6 +52,7 @@
         Friendly Miner Dashboard — Inteligência de Leads
     </div>
 
+    <script src="config.js"></script>
     <script src="js/popup.js"></script>
 </body>
 </html>

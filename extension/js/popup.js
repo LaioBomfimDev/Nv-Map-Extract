@@ -1,15 +1,7 @@
 // ================================================================
-// MAPS SEARCH EXTRACTOR — Popup JS
-// Sem login, sem paywall. Busca rápida + configuração de URL.
+// FRIENDLY MINER — Popup JS
+// Busca rápida + status da conta (login feito no painel Vercel).
 // ================================================================
-
-const DEFAULT_URL = 'http://localhost:5000/api';
-
-// ——— Carregar URL salva ——————————————————————————————————————————
-chrome.storage.sync.get({ dashboardUrl: DEFAULT_URL }, (data) => {
-    document.getElementById('dashboardUrl').value = data.dashboardUrl;
-    checkHealth(data.dashboardUrl);
-});
 
 // ——— Botão: Busca rápida no Maps ————————————————————————————————
 document.getElementById('btnSearch').addEventListener('click', () => {
@@ -17,42 +9,38 @@ document.getElementById('btnSearch').addEventListener('click', () => {
     if (!q) return;
     window.open('https://www.google.com.br/maps/search/' + encodeURIComponent(q));
 });
-
-// Abrir no Enter
 document.getElementById('searchInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.getElementById('btnSearch').click();
 });
 
-// ——— Botão: Salvar URL ————————————————————————————————————————
-document.getElementById('btnSave').addEventListener('click', () => {
-    const url = document.getElementById('dashboardUrl').value.trim() || DEFAULT_URL;
-    chrome.storage.sync.set({ dashboardUrl: url }, () => {
-        const msg = document.getElementById('savedMsg');
-        msg.textContent = '✅ URL salva!';
-        setTimeout(() => { msg.textContent = ''; }, 3000);
-        checkHealth(url);
-    });
+// ——— Botão: Abrir painel (fazer login) ——————————————————————————
+document.getElementById('btnPanel').addEventListener('click', () => {
+    const url = (typeof FM_CONFIG !== 'undefined' && FM_CONFIG.APP_URL) || '';
+    if (url) window.open(url);
 });
 
-// ——— Verificar saúde do backend ————————————————————————————————
-async function checkHealth(apiUrl) {
-    const dot  = document.getElementById('statusDot');
+// ——— Status da conta ————————————————————————————————————————————
+function renderStatus() {
+    const dot = document.getElementById('statusDot');
     const text = document.getElementById('statusText');
-    const healthUrl = apiUrl.replace(/\/api\/?$/, '') + '/api/health';
+    const hint = document.getElementById('loginHint');
 
-    dot.style.background = '#f59e0b'; // amarelo = verificando
-    text.textContent = 'Verificando conexão...';
-
-    try {
-        const res = await fetch(healthUrl, { signal: AbortSignal.timeout(4000) });
-        if (res.ok) {
+    chrome.storage.local.get(['fmAuth'], (data) => {
+        const auth = data.fmAuth;
+        if (auth && auth.access_token && auth.email) {
             dot.style.background = '#22c55e'; // verde
-            text.textContent = 'Dashboard online ✅';
+            text.textContent = `Conectado: ${auth.email}`;
+            hint.textContent = 'Tudo pronto! Minere no Google Maps e clique em enviar.';
         } else {
-            throw new Error('offline');
+            dot.style.background = '#ef4444'; // vermelho
+            text.textContent = 'Não conectado';
+            hint.textContent = 'Clique em "Abrir Painel / Entrar", faça login com o Google e volte aqui.';
         }
-    } catch (_) {
-        dot.style.background = '#ef4444'; // vermelho
-        text.textContent = 'Dashboard offline ❌';
-    }
+    });
 }
+
+renderStatus();
+// Atualiza se a sessão chegar enquanto o popup está aberto.
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.fmAuth) renderStatus();
+});
