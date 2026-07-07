@@ -94,14 +94,16 @@ export default function ProspectTab() {
   // Debounce só no texto digitado; filtros por clique (status/sugestão) seguem na hora.
   const debouncedName = useDebouncedValue(nameFilter, 350);
 
-  const loadLeads = useCallback(async () => {
+  // `forceCount`: recontar o total mesmo fora da 1ª página — usado após
+  // apagar/mover leads em lote, quando o total muda mas a página não.
+  const loadLeads = useCallback(async (forceCount = false) => {
     setLoading(true);
     try {
       const filters = { ...extraFilters };
       if (statusFilter) filters.prospect_status = statusFilter;
       if (debouncedName) filters.name = debouncedName;
       // COUNT(*) exato só na 1ª página; ao paginar reaproveita o total.
-      const res = await api.getAllLeads(page, LIMIT, filters, page === 1);
+      const res = await api.getAllLeads(page, LIMIT, filters, forceCount || page === 1);
       if (res.success) {
         setLeads(res.data.data || []);
         if (res.data.total != null) setTotal(res.data.total);
@@ -159,7 +161,7 @@ export default function ProspectTab() {
       await api.bulkStatus(ids, status);
       flash(`✅ ${ids.length} leads movidos para "${label}"`);
       setSelected(new Set());
-      loadLeads();
+      loadLeads(true);
       loadSummary();
     } catch {
       flash('❌ Erro ao atualizar leads');
@@ -174,7 +176,7 @@ export default function ProspectTab() {
       await api.bulkDelete(ids);
       flash(`🗑️ ${ids.length} leads apagados`);
       setSelected(new Set());
-      loadLeads();
+      loadLeads(true);
       loadSummary();
       loadIgnored();
     } catch {
@@ -488,7 +490,7 @@ export default function ProspectTab() {
                   Lead {mutiraoIndex + 1} de {mutiraoLeads.length} na fila
                 </div>
               </div>
-              <button onClick={() => { setMutiraoActive(false); loadLeads(); loadSummary(); }} style={{ background: 'transparent', border: 'none', color: '#52525b', fontSize: 22, cursor: 'pointer' }}>✕</button>
+              <button onClick={() => { setMutiraoActive(false); loadLeads(true); loadSummary(); }} style={{ background: 'transparent', border: 'none', color: '#52525b', fontSize: 22, cursor: 'pointer' }}>✕</button>
             </div>
 
             {/* Conteúdo do Lead Ativo */}
@@ -535,7 +537,7 @@ export default function ProspectTab() {
                           } else {
                             alert('Parabéns! Você concluiu toda a fila do mutirão!');
                             setMutiraoActive(false);
-                            loadLeads();
+                            loadLeads(true);
                             loadSummary();
                           }
                         } catch (e) {
@@ -557,7 +559,7 @@ export default function ProspectTab() {
                         } else {
                           alert('Fim da fila do mutirão.');
                           setMutiraoActive(false);
-                          loadLeads();
+                          loadLeads(true);
                           loadSummary();
                         }
                       }}

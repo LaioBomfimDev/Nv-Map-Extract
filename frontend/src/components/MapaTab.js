@@ -28,6 +28,15 @@ const escapeHtml = (s) => String(s ?? '').replace(/[&<>"]/g, c => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
 ));
 
+// URL segura para interpolar num href de popup (HTML puro): força esquema http(s)
+// — bloqueando javascript:/data: — e escapa aspas para não vazar do atributo.
+const safeUrl = (u) => {
+  const s = String(u ?? '').trim();
+  if (!s) return '';
+  const withScheme = /^https?:\/\//i.test(s) ? s : `https://${s}`;
+  return escapeHtml(withScheme);
+};
+
 function hasCoords(l) {
   const lat = parseFloat(l.latitude), lng = parseFloat(l.longitude);
   return !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
@@ -106,7 +115,7 @@ function popupHtml(lead, contacted) {
     <p style="margin:0 0 8px;font-size:11px;color:#52525b;">${escapeHtml(lead.address || 'Sem endereço')}</p>
     <div style="display:flex;gap:6px;flex-wrap:wrap;">
       ${wa ? btn(wa, '#10b981', 'WhatsApp') : ''}
-      ${lead.website ? btn(lead.website, '#06b6d4', 'Site') : ''}
+      ${safeUrl(lead.website) ? btn(safeUrl(lead.website), '#06b6d4', 'Site') : ''}
       ${contacted
         ? `<span style="color:${CONTACTED_COLOR};font-size:11px;font-weight:600;align-self:center;">✓ contatado</span>`
         : `<button data-mark="${lead.id}" style="background:#8b5cf6;color:#fff;border:none;padding:4px 8px;font-size:11px;font-weight:600;cursor:pointer;">Marcar enviado</button>`}

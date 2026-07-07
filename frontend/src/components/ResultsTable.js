@@ -187,7 +187,9 @@ export default function ResultsTable({ search }) {
     // Só busca depois que o usuário para de digitar (evita 1 request por tecla).
     const debouncedFilters = useDebouncedValue(filters, 350);
 
-    const load = useCallback(async () => {
+    // `forceCount`: recontar o total mesmo fora da 1ª página — usado após
+    // apagar/mover leads em lote, quando o total muda mas a página não.
+    const load = useCallback(async (forceCount = false) => {
         if (!search?.id) return;
         setLoading(true);
         try {
@@ -200,7 +202,7 @@ export default function ResultsTable({ search }) {
             });
 
             // COUNT(*) exato só na 1ª página; ao paginar reaproveita o total.
-            const res = await api.getResults(search.id, page, LIMIT, activeFilters, page === 1);
+            const res = await api.getResults(search.id, page, LIMIT, activeFilters, forceCount || page === 1);
             if (res.success) {
                 setData(res.data.data || []);
                 if (res.data.total != null) setTotal(res.data.total);
@@ -282,7 +284,7 @@ export default function ResultsTable({ search }) {
             await api.bulkStatus(ids, status);
             flash(`✅ ${ids.length} leads movidos para "${label}"`);
             setSelected(new Set());
-            load();
+            load(true);
         } catch {
             flash('❌ Erro ao atualizar leads');
         }
@@ -296,7 +298,7 @@ export default function ResultsTable({ search }) {
             await api.bulkDelete(ids);
             flash(`🗑️ ${ids.length} leads apagados`);
             setSelected(new Set());
-            load();
+            load(true);
         } catch {
             flash('❌ Erro ao apagar leads');
         }
