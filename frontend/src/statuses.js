@@ -11,6 +11,13 @@ export const STATUS_OPTIONS = [
 
 export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]));
 
+// Status que indicam que já houve contato (mensagem de fato enviada em diante).
+// Usado no Mapa para marcar em verde os leads que você já trabalhou.
+export const CONTACTED_STATUSES = ['enviado', 'respondeu', 'fechado'];
+export function isContacted(status) {
+  return CONTACTED_STATUSES.includes(status);
+}
+
 export function getStatusMeta(value) {
   return STATUS_MAP[value] || STATUS_MAP.novo;
 }

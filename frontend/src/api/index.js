@@ -104,25 +104,52 @@ export const api = {
   },
 
   // ── Resultados de uma busca ───────────────────────────────────────────────
-  getResults: async (id, page = 1, limit = 50, filters = {}) => {
+  // `withCount`: só pede o COUNT(*) exato (caro no Postgres) quando realmente
+  // precisamos — normalmente na 1ª página / quando o filtro muda. Ao paginar,
+  // o total não muda, então mandamos withCount=false e reaproveitamos o anterior.
+  getResults: async (id, page = 1, limit = 50, filters = {}, withCount = true) => {
     const { from, to } = rangeOf(page, limit);
-    let q = supabase.from('results').select('*', { count: 'exact' }).eq('search_id', id);
+    const countOpt = withCount ? { count: 'exact' } : undefined;
+    let q = supabase.from('results').select('*', countOpt).eq('search_id', id);
     q = applyFilters(q, filters).order('created_at', { ascending: false }).range(from, to);
     const { data, count, error } = await q;
     if (error) throw error;
-    return { success: true, data: { data: data || [], total: count || 0, page, limit } };
+    return { success: true, data: { data: data || [], total: withCount ? (count || 0) : null, page, limit } };
   },
 
   // ── Base unificada de leads ───────────────────────────────────────────────
-  getAllLeads: async (page = 1, limit = 50, filters = {}) => {
+  getAllLeads: async (page = 1, limit = 50, filters = {}, withCount = true) => {
     const { from, to } = rangeOf(page, limit);
+    const countOpt = withCount ? { count: 'exact' } : undefined;
     let q = supabase
       .from('results')
-      .select('*, searches(filename,keyword,city)', { count: 'exact' });
+      .select('*, searches(filename,keyword,city)', countOpt);
     q = applyFilters(q, filters).order('created_at', { ascending: false }).range(from, to);
     const { data, count, error } = await q;
     if (error) throw error;
-    return { success: true, data: { data: (data || []).map(flattenLead), total: count || 0, page, limit } };
+    return { success: true, data: { data: (data || []).map(flattenLead), total: withCount ? (count || 0) : null, page, limit } };
+  },
+
+  // ── Mapa: TODOS os leads com coordenadas (todas as buscas) ────────────────
+  // Traz só os campos que o mapa precisa + o tema (keyword) e a cidade da busca.
+  // Pagina em blocos porque o Supabase limita o nº de linhas por request.
+  getMapLeads: async () => {
+    const PAGE = 1000;
+    const cols = 'id,name,category,phone,website,address,latitude,longitude,prospect_status,place_id,searches(keyword,city)';
+    let all = [];
+    for (let page = 0; ; page++) {
+      const { data, error } = await supabase
+        .from('results')
+        .select(cols)
+        .not('latitude', 'is', null)
+        .not('longitude', 'is', null)
+        .range(page * PAGE, page * PAGE + PAGE - 1);
+      if (error) throw error;
+      const rows = (data || []).map(flattenLead);
+      all = all.concat(rows);
+      if (rows.length < PAGE) break;
+    }
+    return { success: true, data: all };
   },
 
   // ── Mutações de lead ──────────────────────────────────────────────────────

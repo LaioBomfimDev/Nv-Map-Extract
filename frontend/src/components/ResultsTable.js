@@ -1,13 +1,146 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import { api } from '../api';
+import useDebouncedValue from '../hooks/useDebounce';
 import MapView from './MapView';
 import LeadModal from './LeadModal';
 import { STATUS_OPTIONS, getWhatsAppUrl } from '../statuses';
-import { 
-    Building2, Tag, Activity, Phone, Mail, MapPin, Globe, Star, Share2, 
-    SlidersHorizontal, Map as MapIcon, Download, Lightbulb, X, Pin, Send, 
+import {
+    Building2, Tag, Activity, Phone, Mail, MapPin, Globe, Star, Share2,
+    SlidersHorizontal, Map as MapIcon, Download, Lightbulb, X, Pin, Send,
     Trash2, StickyNote, MessageCircle, Link2, StarFilled
 } from './Icons';
+
+// Ícones das redes sociais de um lead (função pura — só depende da linha).
+function renderSocials(row) {
+    const socials = [];
+    if (row.instagram) socials.push({ key: 'ig', icon: '📸', url: row.instagram, title: 'Instagram' });
+    if (row.facebook)  socials.push({ key: 'fb', icon: '👥', url: row.facebook, title: 'Facebook' });
+    if (row.linkedin)  socials.push({ key: 'in', icon: '👔', url: row.linkedin, title: 'LinkedIn' });
+    if (row.twitter)   socials.push({ key: 'tw', icon: '🐦', url: row.twitter, title: 'Twitter/X' });
+    if (row.youtube)   socials.push({ key: 'yt', icon: '🎥', url: row.youtube, title: 'YouTube' });
+
+    if (socials.length === 0) return <span style={{ color: '#52525b' }}>—</span>;
+
+    return (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {socials.map(s => (
+                <a key={s.key} href={s.url} target="_blank" rel="noreferrer" title={s.title}
+                   style={{ fontSize: 13, textDecoration: 'none', transition: 'transform 0.15s', display: 'inline-block' }}
+                   onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.2)'}
+                   onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}>
+                    {s.icon}
+                </a>
+            ))}
+        </div>
+    );
+}
+
+// Linha da tabela memoizada: só re-renderiza quando ESTA linha muda (dados ou
+// seleção). Antes, marcar 1 checkbox re-renderizava as 50 linhas de uma vez.
+const ResultRow = memo(function ResultRow({ row, isSelected, onToggleSelect, onStatusChange, onOpen }) {
+    const waUrl = getWhatsAppUrl(row.phone);
+    return (
+        <tr style={{ transition: 'background 0.15s', borderBottom: '1px solid #1c1c22' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(16,185,129,0.04)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        >
+            {/* Seleção */}
+            <td style={{ padding: '14px 14px' }}>
+                <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(row.id)} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
+            </td>
+
+            {/* Nome (abre a ficha da empresa) */}
+            <td onClick={() => onOpen(row)}
+                style={{ padding: '14px 16px', color: '#e4e4e7', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}
+                title={`${row.name} — clique para abrir a ficha`}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ borderBottom: '1px dashed #3f3f46' }}>{row.name || '—'}</span>
+                    {row.notes && <StickyNote size={11} color="#a1a1aa" title="Tem anotações" />}
+                </div>
+            </td>
+
+            {/* Categoria */}
+            <td style={{ padding: '14px 16px', color: '#a1a1aa', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.category}>
+                {row.category || '—'}
+            </td>
+
+            {/* Status CRM */}
+            <td style={{ padding: '14px 16px', color: '#a1a1aa' }}>
+                <select
+                    value={row.prospect_status || 'novo'}
+                    onChange={e => onStatusChange(row.id, e.target.value)}
+                    style={{
+                        background: '#0e0e11', color: '#fafafa', border: '1px solid #27272a',
+                        borderRadius: 0, padding: '4px 6px', fontSize: 12, outline: 'none', cursor: 'pointer'
+                    }}
+                >
+                    {STATUS_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                </select>
+            </td>
+
+            {/* Telefone / DDI WhatsApp */}
+            <td style={{ padding: '14px 16px', color: '#a1a1aa', whiteSpace: 'nowrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span className="mono">{row.phone || '—'}</span>
+                    {waUrl && (
+                        <a href={waUrl} target="_blank" rel="noreferrer" title="Iniciar Conversa no WhatsApp"
+                           style={{ textDecoration: 'none', background: 'rgba(16,185,129,0.15)', color: '#10b981', width: 22, height: 22, borderRadius: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 'bold' }}>
+                            <MessageCircle size={11} color="#10b981" />
+                        </a>
+                    )}
+                </div>
+            </td>
+
+            {/* Email */}
+            <td style={{ padding: '14px 16px', color: '#a1a1aa', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.email}>
+                {row.email || '—'}
+            </td>
+
+            {/* Endereço */}
+            <td style={{ padding: '14px 16px', color: '#a1a1aa', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.address}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.address || '—'}</span>
+                    {row.address && (
+                        <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(row.name + ' ' + row.address)}`} target="_blank" rel="noreferrer" title="Ver no Google Maps"
+                           style={{ textDecoration: 'none', fontSize: 11, display: 'inline-flex', alignItems: 'center' }}>
+                            <MapIcon size={12} color="#10b981" />
+                        </a>
+                    )}
+                </div>
+            </td>
+
+            {/* Website */}
+            <td style={{ padding: '14px 16px', color: '#a1a1aa' }}>
+                {row.website
+                    ? <a href={row.website} target="_blank" rel="noreferrer" style={{ color: '#10b981', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Link2 size={12} />
+                        <span>Site</span>
+                      </a>
+                    : '—'
+                }
+            </td>
+
+            {/* Avaliação */}
+            <td style={{ padding: '14px 16px', color: '#a1a1aa', whiteSpace: 'nowrap' }}>
+                {row.rating > 0
+                    ? <span style={{ color: '#f59e0b', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <StarFilled size={12} color="#f59e0b" />
+                        <span className="mono">{row.rating.toFixed(1)}</span>
+                        <span className="mono" style={{ fontSize: 11, color: '#52525b', fontWeight: 400 }}>({row.reviews_count || 0})</span>
+                      </span>
+                    : '—'
+                }
+            </td>
+
+            {/* Redes Sociais */}
+            <td style={{ padding: '14px 16px' }}>
+                {renderSocials(row)}
+            </td>
+        </tr>
+    );
+});
 
 // Colunas com labels limpas (sem emojis)
 const cols = [
@@ -51,40 +184,46 @@ export default function ResultsTable({ search }) {
 
     const LIMIT = 50;
 
+    // Só busca depois que o usuário para de digitar (evita 1 request por tecla).
+    const debouncedFilters = useDebouncedValue(filters, 350);
+
     const load = useCallback(async () => {
         if (!search?.id) return;
         setLoading(true);
         try {
             // Limpa filtros vazios antes de enviar
             const activeFilters = {};
-            Object.entries(filters).forEach(([k, v]) => {
+            Object.entries(debouncedFilters).forEach(([k, v]) => {
                 if (v !== '' && v !== null && v !== undefined) {
                     activeFilters[k] = v;
                 }
             });
 
-            const res = await api.getResults(search.id, page, LIMIT, activeFilters);
+            // COUNT(*) exato só na 1ª página; ao paginar reaproveita o total.
+            const res = await api.getResults(search.id, page, LIMIT, activeFilters, page === 1);
             if (res.success) {
                 setData(res.data.data || []);
-                setTotal(res.data.total || 0);
+                if (res.data.total != null) setTotal(res.data.total);
             }
         } catch (e) {
             console.error('Erro ao carregar resultados:', e);
         }
         setLoading(false);
-    }, [search, page, filters]);
+    }, [search, page, debouncedFilters]);
 
     // Reseta página e seleção quando a busca selecionada muda ou os filtros mudam
     useEffect(() => {
         setPage(1);
         setSelected(new Set());
-    }, [search, filters]);
+    }, [search, debouncedFilters]);
 
     useEffect(() => { 
         load(); 
     }, [load]);
 
-    const handleStatusChange = async (resultId, newStatus) => {
+    // Estáveis (useCallback) para que a memoização das linhas funcione: se o
+    // handler mudasse de identidade a cada render, todas as linhas re-renderizariam.
+    const handleStatusChange = useCallback(async (resultId, newStatus) => {
         try {
             const res = await api.updateResultStatus(resultId, newStatus);
             if (res.success) {
@@ -93,7 +232,9 @@ export default function ResultsTable({ search }) {
         } catch (e) {
             console.error('Erro ao atualizar status comercial:', e);
         }
-    };
+    }, []);
+
+    const openModal = useCallback((row) => setModalLead(row), []);
 
     const handleFilterChange = (key, value) => {
         setFilters(prev => ({ ...prev, [key]: value }));
@@ -122,13 +263,13 @@ export default function ResultsTable({ search }) {
         setTimeout(() => setActionMsg(''), 3500);
     };
 
-    const toggleSelect = (id) => {
+    const toggleSelect = useCallback((id) => {
         setSelected(prev => {
             const next = new Set(prev);
             if (next.has(id)) next.delete(id); else next.add(id);
             return next;
         });
-    };
+    }, []);
 
     const toggleSelectAll = () => {
         setSelected(prev => prev.size === data.length ? new Set() : new Set(data.map(r => r.id)));
@@ -172,31 +313,6 @@ export default function ResultsTable({ search }) {
     };
 
     const totalPages = Math.max(1, Math.ceil(total / LIMIT));
-
-    // Renderizar ícones das redes sociais
-    const renderSocials = (row) => {
-        const socials = [];
-        if (row.instagram) socials.push({ key: 'ig', icon: '📸', url: row.instagram, title: 'Instagram' });
-        if (row.facebook)  socials.push({ key: 'fb', icon: '👥', url: row.facebook, title: 'Facebook' });
-        if (row.linkedin)  socials.push({ key: 'in', icon: '👔', url: row.linkedin, title: 'LinkedIn' });
-        if (row.twitter)   socials.push({ key: 'tw', icon: '🐦', url: row.twitter, title: 'Twitter/X' });
-        if (row.youtube)   socials.push({ key: 'yt', icon: '🎥', url: row.youtube, title: 'YouTube' });
-
-        if (socials.length === 0) return <span style={{ color: '#52525b' }}>—</span>;
-
-        return (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {socials.map(s => (
-                    <a key={s.key} href={s.url} target="_blank" rel="noreferrer" title={s.title}
-                       style={{ fontSize: 13, textDecoration: 'none', transition: 'transform 0.15s', display: 'inline-block' }}
-                       onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.2)'}
-                       onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}>
-                        {s.icon}
-                    </a>
-                ))}
-            </div>
-        );
-    };
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -429,110 +545,16 @@ export default function ResultsTable({ search }) {
                                 {loading && (
                                     <tr><td colSpan={cols.length + 1} style={{ textAlign: 'center', padding: 40, color: '#52525b', fontFamily: 'var(--font-mono)' }}>Carregando leads...</td></tr>
                                 )}
-                                {!loading && data.map((row, i) => {
-                                    const waUrl = getWhatsAppUrl(row.phone);
-                                    return (
-                                        <tr key={row.id || i} style={{ transition: 'background 0.15s', borderBottom: '1px solid #1c1c22' }}
-                                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(16,185,129,0.04)'}
-                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                        >
-                                            {/* Seleção */}
-                                            <td style={{ padding: '14px 14px' }}>
-                                                <input type="checkbox" checked={selected.has(row.id)} onChange={() => toggleSelect(row.id)} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
-                                            </td>
-
-                                            {/* Nome (abre a ficha da empresa) */}
-                                            <td onClick={() => setModalLead(row)}
-                                                style={{ padding: '14px 16px', color: '#e4e4e7', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}
-                                                title={`${row.name} — clique para abrir a ficha`}>
-                                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                                    <span style={{ borderBottom: '1px dashed #3f3f46' }}>{row.name || '—'}</span>
-                                                    {row.notes && <StickyNote size={11} color="#a1a1aa" title="Tem anotações" />}
-                                                </div>
-                                            </td>
-                                            
-                                            {/* Categoria */}
-                                            <td style={{ padding: '14px 16px', color: '#a1a1aa', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.category}>
-                                                {row.category || '—'}
-                                            </td>
-
-                                            {/* Status CRM */}
-                                            <td style={{ padding: '14px 16px', color: '#a1a1aa' }}>
-                                                <select
-                                                    value={row.prospect_status || 'novo'}
-                                                    onChange={e => handleStatusChange(row.id, e.target.value)}
-                                                    style={{
-                                                        background: '#0e0e11', color: '#fafafa', border: '1px solid #27272a',
-                                                        borderRadius: 0, padding: '4px 6px', fontSize: 12, outline: 'none', cursor: 'pointer'
-                                                    }}
-                                                >
-                                                    {STATUS_OPTIONS.map(opt => (
-                                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                                    ))}
-                                                </select>
-                                            </td>
-
-                                            {/* Telefone / DDI WhatsApp */}
-                                            <td style={{ padding: '14px 16px', color: '#a1a1aa', whiteSpace: 'nowrap' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                    <span className="mono">{row.phone || '—'}</span>
-                                                    {waUrl && (
-                                                        <a href={waUrl} target="_blank" rel="noreferrer" title="Iniciar Conversa no WhatsApp"
-                                                           style={{ textDecoration: 'none', background: 'rgba(16,185,129,0.15)', color: '#10b981', width: 22, height: 22, borderRadius: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 'bold' }}>
-                                                            <MessageCircle size={11} color="#10b981" />
-                                                        </a>
-                                                    )}
-                                                </div>
-                                            </td>
-
-                                            {/* Email */}
-                                            <td style={{ padding: '14px 16px', color: '#a1a1aa', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.email}>
-                                                {row.email || '—'}
-                                            </td>
-
-                                            {/* Endereço */}
-                                            <td style={{ padding: '14px 16px', color: '#a1a1aa', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.address}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.address || '—'}</span>
-                                                    {row.address && (
-                                                        <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(row.name + ' ' + row.address)}`} target="_blank" rel="noreferrer" title="Ver no Google Maps"
-                                                           style={{ textDecoration: 'none', fontSize: 11, display: 'inline-flex', alignItems: 'center' }}>
-                                                            <MapIcon size={12} color="#10b981" />
-                                                        </a>
-                                                    )}
-                                                </div>
-                                            </td>
-
-                                            {/* Website */}
-                                            <td style={{ padding: '14px 16px', color: '#a1a1aa' }}>
-                                                {row.website 
-                                                    ? <a href={row.website} target="_blank" rel="noreferrer" style={{ color: '#10b981', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                                        <Link2 size={12} />
-                                                        <span>Site</span>
-                                                      </a>
-                                                    : '—'
-                                                }
-                                            </td>
-
-                                            {/* Avaliação */}
-                                            <td style={{ padding: '14px 16px', color: '#a1a1aa', whiteSpace: 'nowrap' }}>
-                                                {row.rating > 0
-                                                    ? <span style={{ color: '#f59e0b', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                                        <StarFilled size={12} color="#f59e0b" />
-                                                        <span className="mono">{row.rating.toFixed(1)}</span>
-                                                        <span className="mono" style={{ fontSize: 11, color: '#52525b', fontWeight: 400 }}>({row.reviews_count || 0})</span>
-                                                      </span>
-                                                    : '—'
-                                                }
-                                            </td>
-
-                                            {/* Redes Sociais */}
-                                            <td style={{ padding: '14px 16px' }}>
-                                                {renderSocials(row)}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                                {!loading && data.map((row, i) => (
+                                    <ResultRow
+                                        key={row.id || i}
+                                        row={row}
+                                        isSelected={selected.has(row.id)}
+                                        onToggleSelect={toggleSelect}
+                                        onStatusChange={handleStatusChange}
+                                        onOpen={openModal}
+                                    />
+                                ))}
                                 {!loading && !data.length && (
                                     <tr><td colSpan={cols.length + 1} style={{ textAlign: 'center', padding: 40, color: '#52525b' }}>Nenhum lead correspondente aos filtros</td></tr>
                                 )}

@@ -1,13 +1,24 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import loadLeaflet from '../utils/loadLeaflet';
 
 export default function MapView({ leads }) {
     const mapRef = useRef(null);
     const mapInstance = useRef(null);
     const markersGroup = useRef(null);
+    const [ready, setReady] = useState(!!window.L);
+
+    // Carrega o Leaflet sob demanda na primeira vez que o mapa é montado.
+    useEffect(() => {
+        let cancelled = false;
+        loadLeaflet()
+            .then(() => { if (!cancelled) setReady(true); })
+            .catch(e => console.error(e));
+        return () => { cancelled = true; };
+    }, []);
 
     useEffect(() => {
-        // Verifica se o Leaflet (L) está carregado globalmente
-        if (!window.L) return;
+        // Espera o Leaflet (L) estar disponível globalmente
+        if (!ready || !window.L) return;
 
         // Inicializa o mapa caso ainda não tenha sido criado
         if (!mapInstance.current && mapRef.current) {
@@ -36,10 +47,10 @@ export default function MapView({ leads }) {
                 markersGroup.current = null;
             }
         };
-    }, []);
+    }, [ready]);
 
     useEffect(() => {
-        if (!window.L || !mapInstance.current || !markersGroup.current) return;
+        if (!ready || !window.L || !mapInstance.current || !markersGroup.current) return;
 
         // Limpa os markers antigos
         markersGroup.current.clearLayers();
@@ -111,11 +122,11 @@ export default function MapView({ leads }) {
             console.error('Erro ao ajustar limites do mapa:', e);
         }
 
-    }, [leads]);
+    }, [leads, ready]);
 
     return (
-        <div 
-            ref={mapRef} 
+        <div
+            ref={mapRef}
             style={{ 
                 width: '100%', 
                 height: '100%', 

@@ -12,9 +12,11 @@ export default function Dashboard({ onSelectSearch, onGoTo, onImportCSV }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    const load = useCallback(async () => {
+    // `silent`: refresh em segundo plano (polling) não liga o spinner de tela cheia,
+    // só a primeira carga liga. Evita a tela piscar "Carregando" a cada 30s.
+    const load = useCallback(async (silent = false) => {
         try {
-            setLoading(true);
+            if (!silent) setLoading(true);
             setError('');
             const resMetrics = await api.getMetrics();
             const resCharts = await api.getCharts();
@@ -29,14 +31,24 @@ export default function Dashboard({ onSelectSearch, onGoTo, onImportCSV }) {
         } catch (e) {
             setError('Não foi possível conectar ao backend. Verifique se o servidor está rodando na porta 5000.');
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     }, []);
 
     useEffect(() => {
         load();
-        const t = setInterval(load, 30000);
-        return () => clearInterval(t);
+        // Polling que pausa quando a aba do navegador está oculta (não gasta
+        // 3 RPCs a cada 30s à toa) e refaz uma atualização ao voltar o foco.
+        let timer = null;
+        const startPolling = () => { if (!timer) timer = setInterval(() => load(true), 30000); };
+        const stopPolling = () => { if (timer) { clearInterval(timer); timer = null; } };
+        const onVisibility = () => {
+            if (document.hidden) stopPolling();
+            else { load(true); startPolling(); }
+        };
+        if (!document.hidden) startPolling();
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => { stopPolling(); document.removeEventListener('visibilitychange', onVisibility); };
     }, [load]);
 
     if (loading) return <p style={{ color: '#52525b', padding: '40px 0', textAlign: 'center', fontFamily: 'var(--font-mono)' }}>Carregando métricas e gráficos...</p>;

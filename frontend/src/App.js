@@ -1,23 +1,47 @@
-import React, { useState, useRef, useEffect } from 'react';
-import Dashboard from './components/Dashboard';
+import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import SearchList from './components/SearchList';
-import ResultsTable from './components/ResultsTable';
-import ScraperTab from './components/ScraperTab';
-import ProspectTab from './components/ProspectTab';
 import LoginScreen from './components/LoginScreen';
 import { api } from './api';
 import { supabase } from './supabaseClient';
-import { BarChart3, Search, FolderOpen, MessageCircle, Upload, ChevronLeft } from './components/Icons';
+import { BarChart3, Search, FolderOpen, MessageCircle, Upload, ChevronLeft, Map as MapIcon } from './components/Icons';
+
+// Abas pesadas carregadas sob demanda (code splitting): cada uma vira um chunk
+// separado, baixado só quando a aba é aberta pela primeira vez — em vez de tudo
+// no bundle inicial. ResultsTable arrasta o MapView junto no mesmo chunk.
+const Dashboard    = lazy(() => import('./components/Dashboard'));
+const ResultsTable = lazy(() => import('./components/ResultsTable'));
+const ScraperTab   = lazy(() => import('./components/ScraperTab'));
+const ProspectTab  = lazy(() => import('./components/ProspectTab'));
+const MapaTab      = lazy(() => import('./components/MapaTab'));
+
+function TabFallback() {
+  return <p style={{ color: '#52525b', padding: '40px 0', textAlign: 'center', fontFamily: 'var(--font-mono)' }}>Carregando…</p>;
+}
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   { id: 'scraper',   label: 'Buscar Leads', icon: Search },
   { id: 'searches',  label: 'Importações', icon: FolderOpen },
+  { id: 'mapa',      label: 'Mapa', icon: MapIcon },
   { id: 'prospect',  label: 'Prospecção', icon: MessageCircle },
 ];
 
 function Spinner() {
   return <span style={{ display: 'inline-block', width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />;
+}
+
+// Mantém a aba viva depois da primeira visita: monta só quando é aberta pela
+// primeira vez e, ao trocar de aba, apenas esconde com display:none. Assim o
+// estado e os dados já buscados permanecem — voltar não refaz os fetches.
+function TabPanel({ active, children }) {
+  const [mounted, setMounted] = useState(active);
+  useEffect(() => { if (active) setMounted(true); }, [active]);
+  if (!mounted) return null;
+  return (
+    <div style={{ display: active ? 'block' : 'none' }}>
+      <Suspense fallback={<TabFallback />}>{children}</Suspense>
+    </div>
+  );
 }
 
 // Parser CSV simples (lida com aspas e vírgulas dentro de campos).
@@ -195,18 +219,21 @@ export default function App() {
       <div className="responsive-padding" style={{ flex: 1, padding: '32px', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
 
          {/* Dashboard tab */}
-        {tab === 'dashboard' && (
+        <TabPanel active={tab === 'dashboard'}>
           <Dashboard onSelectSearch={handleSelectSearch} onGoTo={setTab} onImportCSV={() => fileRef.current?.click()} />
-        )}
+        </TabPanel>
 
         {/* Scraper tab (instruções da extensão) */}
-        {tab === 'scraper' && <ScraperTab />}
+        <TabPanel active={tab === 'scraper'}><ScraperTab /></TabPanel>
+
+        {/* Mapa tab */}
+        <TabPanel active={tab === 'mapa'}><MapaTab /></TabPanel>
 
         {/* Prospect tab */}
-        {tab === 'prospect' && <ProspectTab />}
+        <TabPanel active={tab === 'prospect'}><ProspectTab /></TabPanel>
 
         {/* Searches tab */}
-        {tab === 'searches' && (
+        <TabPanel active={tab === 'searches'}>
           <div className="responsive-grid-searches" style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 24, alignItems: 'start' }}>
             <div>
               <div style={{ marginBottom: 16 }}>
@@ -230,7 +257,7 @@ export default function App() {
                 )}
             </div>
           </div>
-        )}
+        </TabPanel>
 
         {/* Results tab (via click em "Ver dados") */}
         {tab === 'results' && selectedSearch && (
@@ -239,7 +266,9 @@ export default function App() {
               style={{ background: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: 13, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 6 }}>
               ← Voltar ao Dashboard
             </button>
-            <ResultsTable search={selectedSearch} />
+            <Suspense fallback={<TabFallback />}>
+              <ResultsTable search={selectedSearch} />
+            </Suspense>
           </div>
         )}
       </div>

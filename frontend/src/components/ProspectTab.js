@@ -1,11 +1,65 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import { api } from '../api';
+import useDebouncedValue from '../hooks/useDebounce';
 import LeadModal from './LeadModal';
 import { STATUS_OPTIONS, getStatusMeta, getWhatsAppUrl, timeSince } from '../statuses';
 import { LayoutGrid, Clock, Lightbulb, Zap, X, Pin, Send, XCircle, Trash2, StickyNote, MessageCircle, ArrowRight, Tag, MapPin, AlertTriangle, DynIcon } from './Icons';
 
 const card = { background: '#18181b', border: '1px solid #27272a', borderRadius: 0 };
 const LIMIT = 50;
+
+// Linha da lista de leads memoizada: só re-renderiza quando ESTE lead muda
+// (dados ou seleção), em vez de a lista inteira a cada clique de checkbox.
+const ProspectRow = memo(function ProspectRow({ lead, isSelected, onToggleSelect, onOpen }) {
+  const meta = getStatusMeta(lead.prospect_status);
+  const waUrl = getWhatsAppUrl(lead.phone);
+  return (
+    <tr
+        style={{ transition: 'background 0.15s', cursor: 'pointer', borderBottom: '1px solid #18181b' }}
+        onMouseEnter={e => e.currentTarget.style.background = 'rgba(16,185,129,0.04)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+      <td style={{ padding: '14px 14px' }} onClick={e => e.stopPropagation()}>
+        <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(lead.id)} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
+      </td>
+      <td onClick={() => onOpen(lead)} style={{ padding: '14px 14px', maxWidth: 220 }}>
+        <div style={{ color: '#fafafa', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }} title={lead.name}>
+          <span>{lead.name}</span>
+          {lead.notes && <StickyNote size={12} color="#a1a1aa" title="Tem anotações" />}
+        </div>
+        <div style={{ color: '#52525b', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>{lead.category || '—'}</div>
+      </td>
+      <td onClick={() => onOpen(lead)} style={{ padding: '14px 14px', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: meta.color, background: `${meta.color}18`, padding: '3px 10px', borderRadius: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <DynIcon name={meta.icon} size={11} color={meta.color} />
+          <span>{meta.label}</span>
+        </span>
+      </td>
+      <td style={{ padding: '14px 14px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="mono" style={{ color: '#a1a1aa' }}>{lead.phone || '—'}</span>
+          {waUrl && (
+            <a href={waUrl} target="_blank" rel="noreferrer" title="Abrir WhatsApp"
+               style={{ textDecoration: 'none', background: 'rgba(16,185,129,0.15)', color: '#10b981', width: 24, height: 24, borderRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>
+              <MessageCircle size={12} color="#10b981" />
+            </a>
+          )}
+        </div>
+      </td>
+      <td onClick={() => onOpen(lead)} style={{ padding: '14px 14px', color: '#52525b', whiteSpace: 'nowrap', fontSize: 12 }}>
+        {lead.last_contact_at ? timeSince(lead.last_contact_at) : '—'}
+      </td>
+      <td onClick={() => onOpen(lead)} style={{ padding: '14px 14px', color: '#52525b', fontSize: 11, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.search_filename}>
+        {lead.search_keyword || lead.search_filename || '—'}
+      </td>
+      <td onClick={() => onOpen(lead)} style={{ padding: '14px 14px', textAlign: 'right' }}>
+        <span style={{ color: '#10b981', fontSize: 12, fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span>Abrir</span>
+          <ArrowRight size={12} />
+        </span>
+      </td>
+    </tr>
+  );
+});
 
 export default function ProspectTab() {
   const [summary, setSummary]     = useState(null);
@@ -37,20 +91,24 @@ export default function ProspectTab() {
     } catch { /* backend indisponível */ }
   }, []);
 
+  // Debounce só no texto digitado; filtros por clique (status/sugestão) seguem na hora.
+  const debouncedName = useDebouncedValue(nameFilter, 350);
+
   const loadLeads = useCallback(async () => {
     setLoading(true);
     try {
       const filters = { ...extraFilters };
       if (statusFilter) filters.prospect_status = statusFilter;
-      if (nameFilter) filters.name = nameFilter;
-      const res = await api.getAllLeads(page, LIMIT, filters);
+      if (debouncedName) filters.name = debouncedName;
+      // COUNT(*) exato só na 1ª página; ao paginar reaproveita o total.
+      const res = await api.getAllLeads(page, LIMIT, filters, page === 1);
       if (res.success) {
         setLeads(res.data.data || []);
-        setTotal(res.data.total || 0);
+        if (res.data.total != null) setTotal(res.data.total);
       }
     } catch { /* backend indisponível */ }
     setLoading(false);
-  }, [page, statusFilter, extraFilters, nameFilter]);
+  }, [page, statusFilter, extraFilters, debouncedName]);
 
   const loadIgnored = useCallback(async () => {
     try {
@@ -62,7 +120,7 @@ export default function ProspectTab() {
   useEffect(() => { loadSummary(); }, [loadSummary]);
   useEffect(() => { loadLeads(); }, [loadLeads]);
   useEffect(() => { loadIgnored(); }, [loadIgnored]);
-  useEffect(() => { setPage(1); setSelected(new Set()); }, [statusFilter, extraFilters, nameFilter]);
+  useEffect(() => { setPage(1); setSelected(new Set()); }, [statusFilter, extraFilters, debouncedName]);
 
   async function restoreIgnored(item) {
     try {
@@ -79,13 +137,16 @@ export default function ProspectTab() {
     setTimeout(() => setActionMsg(''), 3500);
   }
 
-  function toggleSelect(id) {
+  // Estáveis para a memoização das linhas (identidade constante entre renders).
+  const toggleSelect = useCallback((id) => {
     setSelected(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
-  }
+  }, []);
+
+  const openModal = useCallback((lead) => setModalLead(lead), []);
 
   function toggleSelectAll() {
     setSelected(prev => prev.size === leads.length ? new Set() : new Set(leads.map(l => l.id)));
@@ -323,56 +384,15 @@ export default function ProspectTab() {
               {loading && (
                 <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#52525b', fontFamily: 'var(--font-mono)' }}>Carregando leads...</td></tr>
               )}
-              {!loading && leads.map(lead => {
-                const meta = getStatusMeta(lead.prospect_status);
-                const waUrl = getWhatsAppUrl(lead.phone);
-                return (
-                  <tr key={lead.id}
-                      style={{ transition: 'background 0.15s', cursor: 'pointer', borderBottom: '1px solid #18181b' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(16,185,129,0.04)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    <td style={{ padding: '14px 14px' }} onClick={e => e.stopPropagation()}>
-                      <input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggleSelect(lead.id)} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
-                    </td>
-                    <td onClick={() => setModalLead(lead)} style={{ padding: '14px 14px', maxWidth: 220 }}>
-                      <div style={{ color: '#fafafa', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }} title={lead.name}>
-                        <span>{lead.name}</span>
-                        {lead.notes && <StickyNote size={12} color="#a1a1aa" title="Tem anotações" />}
-                      </div>
-                      <div style={{ color: '#52525b', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>{lead.category || '—'}</div>
-                    </td>
-                    <td onClick={() => setModalLead(lead)} style={{ padding: '14px 14px', whiteSpace: 'nowrap' }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: meta.color, background: `${meta.color}18`, padding: '3px 10px', borderRadius: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <DynIcon name={meta.icon} size={11} color={meta.color} />
-                        <span>{meta.label}</span>
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 14px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className="mono" style={{ color: '#a1a1aa' }}>{lead.phone || '—'}</span>
-                        {waUrl && (
-                          <a href={waUrl} target="_blank" rel="noreferrer" title="Abrir WhatsApp"
-                             style={{ textDecoration: 'none', background: 'rgba(16,185,129,0.15)', color: '#10b981', width: 24, height: 24, borderRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>
-                            <MessageCircle size={12} color="#10b981" />
-                          </a>
-                        )}
-                      </div>
-                    </td>
-                    <td onClick={() => setModalLead(lead)} style={{ padding: '14px 14px', color: '#52525b', whiteSpace: 'nowrap', fontSize: 12 }}>
-                      {lead.last_contact_at ? timeSince(lead.last_contact_at) : '—'}
-                    </td>
-                    <td onClick={() => setModalLead(lead)} style={{ padding: '14px 14px', color: '#52525b', fontSize: 11, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.search_filename}>
-                      {lead.search_keyword || lead.search_filename || '—'}
-                    </td>
-                    <td onClick={() => setModalLead(lead)} style={{ padding: '14px 14px', textAlign: 'right' }}>
-                      <span style={{ color: '#10b981', fontSize: 12, fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <span>Abrir</span>
-                        <ArrowRight size={12} />
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+              {!loading && leads.map(lead => (
+                <ProspectRow
+                  key={lead.id}
+                  lead={lead}
+                  isSelected={selected.has(lead.id)}
+                  onToggleSelect={toggleSelect}
+                  onOpen={openModal}
+                />
+              ))}
               {!loading && !leads.length && (
                 <tr><td colSpan={7} style={{ textAlign: 'center', padding: 50, color: '#52525b' }}>
                   {totalLeads === 0
