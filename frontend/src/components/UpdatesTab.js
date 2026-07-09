@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, Clock, Download, ExternalLink, FileText, FolderOpen, Upload } from './Icons';
+import { AlertTriangle, Check, Clock, Download, ExternalLink, FileText, FolderOpen, MessageCircle, Upload } from './Icons';
+
+const EXTENSIONS_URL = 'chrome://extensions';
+const SUPPORT_PHONE = '5571999575358';
+const SUPPORT_TEXT = encodeURIComponent('Oi, preciso de ajuda para atualizar a extensao Friendly Miner.');
+const SUPPORT_URL = `https://wa.me/${SUPPORT_PHONE}?text=${SUPPORT_TEXT}`;
 
 const card = {
   background: '#18181b',
@@ -36,20 +41,19 @@ function formatDate(date) {
   return d.toLocaleDateString('pt-BR');
 }
 
-function StepList({ title, steps, icon: Icon }) {
+function SimpleStep({ number, title, text, icon: Icon }) {
   return (
-    <div style={card}>
-      <h3 style={{ fontSize: 15, fontWeight: 700, color: '#fafafa', margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Icon size={16} color="#10b981" />
-        {title}
-      </h3>
-      <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {steps.map((s, i) => (
-          <li key={i} style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.55 }}>
-            {s}
-          </li>
-        ))}
-      </ol>
+    <div style={{ background: '#09090b', border: '1px solid #27272a', padding: 18, display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+      <div style={{ width: 34, height: 34, background: 'rgba(16,185,129,0.14)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
+        {number}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <Icon size={15} color="#10b981" />
+          <strong style={{ color: '#fafafa', fontSize: 14 }}>{title}</strong>
+        </div>
+        <p style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.55, margin: 0 }}>{text}</p>
+      </div>
     </div>
   );
 }
@@ -59,6 +63,8 @@ export default function UpdatesTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [extensionsHint, setExtensionsHint] = useState('');
+  const [showResetHelp, setShowResetHelp] = useState(false);
   const [extension, setExtension] = useState({ installed: false, version: '' });
 
   useEffect(() => {
@@ -161,14 +167,34 @@ export default function UpdatesTab() {
 
   const StatusIcon = status.icon;
 
-  async function copyExtensionsUrl() {
+  async function copyText(text) {
     try {
-      await navigator.clipboard.writeText('chrome://extensions');
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+      await navigator.clipboard.writeText(text);
+      return true;
     } catch (_) {
-      setCopied(false);
+      return false;
     }
+  }
+
+  async function openExtensionsPage() {
+    window.postMessage({ __fm: 'site', action: 'openExtensionsPage' }, '*');
+    try {
+      window.open(`${EXTENSIONS_URL}/`, '_blank', 'noopener');
+    } catch (_) {}
+
+    const didCopy = await copyText(EXTENSIONS_URL);
+    setCopied(didCopy);
+    setExtensionsHint(didCopy
+      ? 'Se nao abrir automaticamente, cole chrome://extensions na barra do Chrome.'
+      : 'Se nao abrir automaticamente, digite chrome://extensions na barra do Chrome.');
+    setTimeout(() => {
+      setCopied(false);
+      setExtensionsHint('');
+    }, 6000);
+  }
+
+  function scrollToFaq() {
+    document.getElementById('updates-faq')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   if (loading) {
@@ -229,7 +255,7 @@ export default function UpdatesTab() {
               }}
             >
               <Download size={16} />
-              {updateAvailable ? 'Baixar atualizacao' : 'Baixar extensao'}
+              {updateAvailable ? '1. Baixar atualizacao' : '1. Baixar extensao'}
             </a>
           ) : (
             <button
@@ -250,13 +276,13 @@ export default function UpdatesTab() {
               }}
             >
               <Download size={16} color="#71717a" />
-              Download nao configurado
+              Download sera liberado aqui
             </button>
           )}
 
           <button
             type="button"
-            onClick={copyExtensionsUrl}
+            onClick={openExtensionsPage}
             style={{
               background: 'rgba(39,39,42,0.55)',
               color: '#e4e4e7',
@@ -272,34 +298,188 @@ export default function UpdatesTab() {
             }}
           >
             <ExternalLink size={16} />
-            {copied ? 'Endereco copiado' : 'Copiar chrome://extensions'}
+            {copied ? 'Endereco copiado' : '2. Abrir extensoes'}
           </button>
+
+          <button
+            type="button"
+            onClick={scrollToFaq}
+            style={{
+              background: 'rgba(6,182,212,0.1)',
+              color: '#67e8f9',
+              border: '1px solid rgba(6,182,212,0.28)',
+              padding: '11px 18px',
+              borderRadius: 0,
+              fontSize: 14,
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+            }}
+          >
+            <MessageCircle size={16} color="#67e8f9" />
+            Preciso de ajuda
+          </button>
+        </div>
+        <p style={{ color: '#71717a', fontSize: 12, lineHeight: 1.5, margin: '12px 0 0' }}>
+          Depois de baixar, extraia o zip antes de abrir o Chrome. O Chrome carrega a pasta extraida, nao o arquivo zip.
+        </p>
+        {extensionsHint && (
+          <p style={{ color: '#a7f3d0', fontSize: 12, lineHeight: 1.5, margin: '8px 0 0' }}>
+            {extensionsHint}
+          </p>
+        )}
+      </div>
+
+      <div style={card}>
+        <h3 style={{ fontSize: 16, fontWeight: 800, color: '#fafafa', margin: '0 0 6px' }}>Como atualizar sem se perder</h3>
+        <p style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.55, margin: '0 0 18px' }}>
+          O jeito mais simples e manter a mesma pasta da extensao. Assim voce so troca os arquivos e aperta recarregar.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+          <SimpleStep
+            number="1"
+            title="Baixar"
+            icon={Download}
+            text="Baixe a nova versao pelo botao verde desta pagina."
+          />
+          <SimpleStep
+            number="2"
+            title="Extrair por cima"
+            icon={FolderOpen}
+            text="Abra o zip e substitua os arquivos dentro da pasta antiga da extensao."
+          />
+          <SimpleStep
+            number="3"
+            title="Recarregar"
+            icon={Upload}
+            text="Cole chrome://extensions no Chrome e clique no botao de recarregar da Friendly Miner."
+          />
+        </div>
+
+        <div style={{ marginTop: 16, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', padding: 14, color: '#a7f3d0', fontSize: 13, lineHeight: 1.55 }}>
+          Pronto. Volte para esta aba e confira se a versao instalada mudou. Os leads continuam salvos no painel.
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-        <StepList
-          title="Atualizar mantendo a pasta"
-          icon={Upload}
-          steps={[
-            'Baixe o arquivo zip da nova versao.',
-            'Extraia o conteudo por cima da pasta antiga da extensao.',
-            'Abra chrome://extensions no Chrome.',
-            'Encontre Friendly Miner Extractor e clique no botao de recarregar.',
-            'Volte ao painel e confirme se a versao instalada mudou.',
-          ]}
-        />
-        <StepList
-          title="Instalar do zero"
-          icon={FolderOpen}
-          steps={[
-            'Remova a extensao antiga em chrome://extensions.',
-            'Extraia o novo zip em uma pasta limpa.',
-            'Ative o Modo do desenvolvedor no canto superior direito.',
-            'Clique em Carregar sem compactacao.',
-            'Selecione a pasta nova da extensao e abra o painel novamente.',
-          ]}
-        />
+        <div style={{ ...card, borderLeft: '3px solid #10b981' }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#fafafa', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Check size={16} color="#10b981" />
+            O que voce nao precisa fazer
+          </h3>
+          <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[
+              'Nao precisa criar outra conta.',
+              'Nao precisa importar leads de novo.',
+              'Nao precisa apagar a extensao se souber onde esta a pasta antiga.',
+              'Nao perde dados ao atualizar, porque os leads ficam no Supabase.',
+            ].map((item, i) => (
+              <li key={i} style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.5 }}>{item}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div style={{ ...card, borderLeft: '3px solid #f59e0b' }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#fafafa', margin: '0 0 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertTriangle size={16} color="#f59e0b" />
+            Nao achei a pasta antiga
+          </h3>
+          <p style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.55, margin: '0 0 12px' }}>
+            Use este caminho so quando nao souber onde a extensao antiga esta salva.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowResetHelp(v => !v)}
+            style={{
+              background: 'rgba(245,158,11,0.12)',
+              color: '#fbbf24',
+              border: '1px solid rgba(245,158,11,0.3)',
+              padding: '9px 13px',
+              borderRadius: 0,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            {showResetHelp ? 'Esconder instalacao do zero' : 'Ver instalacao do zero'}
+          </button>
+          {showResetHelp && (
+            <ol style={{ margin: '14px 0 0', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                'Remova a extensao antiga em chrome://extensions.',
+                'Extraia o novo zip em uma pasta limpa.',
+                'Clique em Carregar sem compactacao.',
+                'Selecione a pasta nova da extensao.',
+                'Abra o painel novamente e faca login se pedir.',
+              ].map((item, i) => (
+                <li key={i} style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.5 }}>{item}</li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+
+      <div id="updates-faq" style={{ ...card, borderLeft: '3px solid #06b6d4' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 16 }}>
+          <div style={{ flex: '1 1 360px' }}>
+            <h3 style={{ fontSize: 16, fontWeight: 800, color: '#fafafa', margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <MessageCircle size={17} color="#67e8f9" />
+              FAQ e suporte
+            </h3>
+            <p style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.55, margin: 0 }}>
+              Se nao conseguir atualizar, pode chamar no WhatsApp. O suporte esta sempre ativo.
+            </p>
+          </div>
+          <a
+            href={SUPPORT_URL}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              background: 'linear-gradient(135deg,#10b981,#059669)',
+              color: '#fff',
+              textDecoration: 'none',
+              border: 'none',
+              padding: '11px 16px',
+              borderRadius: 0,
+              fontSize: 14,
+              fontWeight: 800,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <MessageCircle size={16} />
+            WhatsApp 71 99957-5358
+          </a>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
+          {[
+            {
+              q: 'Cliquei em Abrir extensoes e nada aconteceu',
+              a: 'O Chrome pode bloquear paginas internas abertas por sites. O botao tambem copia chrome://extensions; cole esse texto na barra do Chrome.',
+            },
+            {
+              q: 'Nao sei qual pasta substituir',
+              a: 'Abra chrome://extensions, procure a Friendly Miner e veja o caminho da extensao. Se nao achar, use a instalacao do zero desta pagina.',
+            },
+            {
+              q: 'Meus leads somem se eu remover a extensao?',
+              a: 'Nao. Os leads ficam salvos no painel pelo Supabase. A extensao so minera e envia os dados.',
+            },
+            {
+              q: 'Depois de atualizar ainda aparece versao antiga',
+              a: 'Clique em recarregar na extensao e atualize esta pagina. Se continuar, chame o suporte no WhatsApp.',
+            },
+          ].map((item, i) => (
+            <div key={i} style={{ background: '#09090b', border: '1px solid #27272a', padding: 14 }}>
+              <strong style={{ display: 'block', color: '#fafafa', fontSize: 13, marginBottom: 6 }}>{item.q}</strong>
+              <p style={{ color: '#a1a1aa', fontSize: 12, lineHeight: 1.5, margin: 0 }}>{item.a}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div style={card}>

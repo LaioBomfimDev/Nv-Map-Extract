@@ -83,6 +83,10 @@
       publishStatus();
       return;
     }
+    if (d.action === 'openExtensionsPage') {
+      try { chrome.runtime.sendMessage({ action: 'fmOpenExtensionsPage' }); } catch (_) {}
+      return;
+    }
     if (d.action === 'startSearch' && d.query) {
       try { chrome.runtime.sendMessage({ action: 'fmStartSearch', data: { query: d.query } }); } catch (_) {}
     }

@@ -69,6 +69,12 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         return false;
     }
 
+    // Atalho do painel para abrir a tela de extensões do Chrome.
+    if (msg.action === 'fmOpenExtensionsPage') {
+        try { chrome.tabs.create({ url: 'chrome://extensions/' }); } catch (_) {}
+        return false;
+    }
+
     // Painel enviou a sessão do usuário logado → guardar
     if (msg.action === 'fmAuth') {
         if (msg.data && msg.data.access_token) {
