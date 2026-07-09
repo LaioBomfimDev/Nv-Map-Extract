@@ -1,0 +1,33 @@
+{
+  "latest": {
+    "version": "2.0.0",
+    "title": "Versao online com Supabase",
+    "releasedAt": "2026-07-08",
+    "downloadUrl": "",
+    "required": false,
+    "notes": "Preencha downloadUrl quando gerar o zip publico da extensao."
+  },
+  "history": [
+    {
+      "version": "2.0.0",
+      "title": "Versao online com painel Vercel",
+      "releasedAt": "2026-07-08",
+      "changes": [
+        "Painel web conectado ao Supabase.",
+        "Login por email/senha e Google.",
+        "Extensao envia leads direto para a conta logada.",
+        "Base preparada para avisos de atualizacao manual."
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "title": "Primeira versao local",
+      "releasedAt": "2026-07-03",
+      "changes": [
+        "Dashboard inicial para visualizar leads.",
+        "Importacao de CSV.",
+        "Extracao pelo Google Maps via extensao."
+      ]
+    }
+  ]
+}

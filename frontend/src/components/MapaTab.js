@@ -7,10 +7,11 @@ import {
 } from '../utils/themeColors';
 import {
   loadMunicipios, loadUfMesh, computeVisited, computeDensities,
-  computeSuggestions, computeDeepen, gmapsSearchUrl,
+  computeSuggestions, computeDeepen, gmapsQuery, gmapsSearchUrl, requestExtensionStatus, startMineQuery,
 } from '../utils/geo';
 import { isContacted } from '../statuses';
 import MapaSuggestions from './MapaSuggestions';
+import LeadModal from './LeadModal';
 import { Map as MapIcon, Send, Building2 } from './Icons';
 
 const DARK_TILES = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
@@ -27,15 +28,42 @@ const popShort = (p) => p >= 1000000 ? `${(p / 1000000).toFixed(1)} mi` : p >= 1
 const escapeHtml = (s) => String(s ?? '').replace(/[&<>"]/g, c => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
 ));
+const dataAttr = (s) => encodeURIComponent(String(s ?? ''));
+const readDataAttr = (s) => {
+  try { return decodeURIComponent(s || ''); } catch (_) { return String(s || ''); }
+};
+const idKey = (id) => String(id ?? '');
+const idsEqual = (a, b) => idKey(a) !== '' && idKey(a) === idKey(b);
 
 // URL segura para interpolar num href de popup (HTML puro): força esquema http(s)
 // — bloqueando javascript:/data: — e escapa aspas para não vazar do atributo.
 const safeUrl = (u) => {
-  const s = String(u ?? '').trim();
-  if (!s) return '';
-  const withScheme = /^https?:\/\//i.test(s) ? s : `https://${s}`;
-  return escapeHtml(withScheme);
+  const raw = String(u ?? '').trim();
+  if (!raw) return '';
+  const candidate = /^[a-z][a-z\d+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const url = new URL(candidate);
+    if (!['http:', 'https:'].includes(url.protocol)) return '';
+    return escapeHtml(url.href);
+  } catch {
+    return '';
+  }
 };
+
+function mergeHydratedLead(current, hydrated, openedLead) {
+  if (!current || !hydrated || !idsEqual(current.id, openedLead?.id)) return current;
+  const merged = { ...current, ...hydrated };
+  if ((current.prospect_status ?? '') !== (openedLead.prospect_status ?? '')) {
+    merged.prospect_status = current.prospect_status;
+  }
+  if ((current.notes ?? '') !== (openedLead.notes ?? '')) {
+    merged.notes = current.notes;
+  }
+  if ((current.last_contact_at ?? '') !== (openedLead.last_contact_at ?? '')) {
+    merged.last_contact_at = current.last_contact_at;
+  }
+  return merged;
+}
 
 function hasCoords(l) {
   const lat = parseFloat(l.latitude), lng = parseFloat(l.longitude);
@@ -105,9 +133,13 @@ function makeClusterIcon(cluster) {
   });
 }
 
+// Popup rápido de um lead: ações diretas (WhatsApp/Site/Marcar enviado) +
+// botão "Abrir ficha" que abre o LeadModal completo (data-open -> listener).
 function popupHtml(lead, contacted) {
   const digits = (lead.phone || '').replace(/\D/g, '');
   const wa = digits ? `https://wa.me/${digits.startsWith('55') ? digits : '55' + digits}` : null;
+  const site = safeUrl(lead.website);
+  const leadId = escapeHtml(idKey(lead.id));
   const btn = (href, bg, label) => `<a href="${href}" target="_blank" rel="noreferrer" style="background:${bg};color:#fff;padding:4px 8px;font-size:11px;text-decoration:none;font-weight:600;">${label}</a>`;
   return `<div style="font-family:'Inter',sans-serif;color:#fafafa;padding:6px;min-width:190px;background:#18181b;">
     <h4 style="margin:0 0 4px;font-size:13px;font-weight:700;color:#fafafa;">${escapeHtml(lead.name)}</h4>
@@ -115,11 +147,12 @@ function popupHtml(lead, contacted) {
     <p style="margin:0 0 8px;font-size:11px;color:#52525b;">${escapeHtml(lead.address || 'Sem endereço')}</p>
     <div style="display:flex;gap:6px;flex-wrap:wrap;">
       ${wa ? btn(wa, '#10b981', 'WhatsApp') : ''}
-      ${safeUrl(lead.website) ? btn(safeUrl(lead.website), '#06b6d4', 'Site') : ''}
+      ${site ? btn(site, '#06b6d4', 'Site') : ''}
       ${contacted
         ? `<span style="color:${CONTACTED_COLOR};font-size:11px;font-weight:600;align-self:center;">✓ contatado</span>`
-        : `<button data-mark="${lead.id}" style="background:#8b5cf6;color:#fff;border:none;padding:4px 8px;font-size:11px;font-weight:600;cursor:pointer;">Marcar enviado</button>`}
+        : (leadId ? `<button data-mark="${leadId}" style="background:#8b5cf6;color:#fff;border:none;padding:4px 8px;font-size:11px;font-weight:600;cursor:pointer;">Marcar enviado</button>` : '')}
     </div>
+    ${leadId ? `<button data-open="${leadId}" style="margin-top:8px;width:100%;background:transparent;border:1px solid #3f3f46;color:#a1a1aa;padding:5px 8px;font-size:11px;font-weight:600;cursor:pointer;">Abrir ficha completa</button>` : ''}
   </div>`;
 }
 
@@ -140,7 +173,7 @@ function muniPopupHtml(muni, visitedEntry, densities, labelOf, colorOf, extra = 
       .slice(0, 4);
     const lines = ests.map(e => `<div style="font-size:11px;color:#a1a1aa;">~<span style="color:${colorOf(e.tk)};font-weight:600;">${num(e.est)}</span> ${escapeHtml(labelOf(e.tk))}</div>`).join('');
     const top = ests[0];
-    const link = top ? `<a href="${gmapsSearchUrl(labelOf(top.tk), muni)}" target="_blank" rel="noreferrer" style="background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:#10b981;padding:4px 8px;font-size:11px;text-decoration:none;font-weight:600;">Minerar no Google Maps</a>` : '';
+    const link = top ? `<a href="${escapeHtml(gmapsSearchUrl(labelOf(top.tk), muni))}" data-mine-query="${dataAttr(gmapsQuery(labelOf(top.tk), muni))}" target="_blank" rel="noreferrer" style="display:inline-flex;align-items:center;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:#10b981;padding:4px 8px;font-size:11px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;text-decoration:none;">Minerar no Google Maps</a>` : '';
     body = `<div style="margin:4px 0 8px;">${lines}<div style="font-size:10px;color:#52525b;margin-top:2px;">estimativa pelo seu histórico</div></div>${link}`;
   }
   return `<div style="font-family:'Inter',sans-serif;color:#fafafa;padding:6px;min-width:180px;background:#18181b;">
@@ -162,6 +195,7 @@ export default function MapaTab() {
   const [muniError, setMuniError] = useState('');
   const [onlyPending, setOnlyPending] = useState(false);
   const [sugControls, setSugControls] = useState({ maxKm: 100, minEst: 0, themeKey: '' });
+  const [modalLead, setModalLead] = useState(null);
 
   const mapDiv = useRef(null);
   const mapInst = useRef(null);
@@ -171,7 +205,11 @@ export default function MapaTab() {
   const sugMarkersRef = useRef(new Map());
   const pluginRef = useRef(false);
   const fitted = useRef(false);
+  // Refs para os botões dentro do popup (HTML puro): os listeners nativos do
+  // Leaflet são ligados uma vez e não devem capturar um estado/closure antigo.
   const markSentRef = useRef(() => {});
+  const openLeadRef = useRef(() => {});
+  const leadsByIdRef = useRef(new Map());
 
   // Busca todos os leads com coordenadas uma vez.
   useEffect(() => {
@@ -181,6 +219,12 @@ export default function MapaTab() {
       .catch(() => { if (!cancelled) setError('Não foi possível carregar os leads do mapa.'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
+  }, []);
+
+  // Pede um status fresco da extensão para o dispatcher de mineração decidir
+  // entre ponte nativa e fallback de Maps antes do primeiro clique.
+  useEffect(() => {
+    requestExtensionStatus();
   }, []);
 
   // Carrega o Leaflet + plugin de cluster (com fallback para pontos simples).
@@ -204,6 +248,10 @@ export default function MapaTab() {
   }, []);
 
   const plotted = useMemo(() => leads.filter(hasCoords), [leads]);
+
+  // Índice id -> lead para o botão "Abrir ficha" do popup resolver o lead
+  // completo (o handler nativo do Leaflet só enxerga o id via atributo).
+  leadsByIdRef.current = useMemo(() => new Map(plotted.map(l => [idKey(l.id), l])), [plotted]);
 
   // Estatística por tema (base da legenda e das cores).
   const themeStats = useMemo(() => {
@@ -256,13 +304,40 @@ export default function MapaTab() {
     [visited, densities, sugControls]
   );
 
-  // Marca um lead como "enviado" direto do popup do mapa (via ref para o
-  // handler nativo do Leaflet não capturar um estado antigo).
+  // Marca um lead como "enviado" direto do popup do mapa.
   markSentRef.current = async (id) => {
+    const sentAt = new Date().toISOString();
     try {
       await api.updateResultStatus(id, 'enviado');
-      setLeads(prev => prev.map(l => (l.id === id ? { ...l, prospect_status: 'enviado' } : l)));
+      setLeads(prev => prev.map(l => (idsEqual(l.id, id) ? { ...l, prospect_status: 'enviado', last_contact_at: sentAt } : l)));
+      setModalLead(prev => (prev && idsEqual(prev.id, id) ? { ...prev, prospect_status: 'enviado', last_contact_at: sentAt } : prev));
     } catch { /* mantém como estava */ }
+  };
+
+  // Abre a ficha completa (LeadModal) pelo botão "Abrir ficha" do popup. Mostra
+  // na hora o que o mapa já tem (nome, telefone, endereço…) e, em paralelo,
+  // busca os campos que faltam (email, avaliação, redes, anotações) e mescla.
+  openLeadRef.current = (lead) => {
+    if (idKey(lead?.id) === '') return;
+    setModalLead(lead);
+    api.getLead(lead.id)
+      .then(r => {
+        if (r?.success && r.data) {
+          setModalLead(prev => mergeHydratedLead(prev, r.data, lead));
+        }
+      })
+      .catch(() => { /* mantém os campos que já tínhamos */ });
+  };
+
+  // Reflete no mapa as edições feitas na ficha (status, anotações, exclusão).
+  const onLeadUpdated = (updated) => {
+    if (!updated) return;
+    setLeads(prev => prev.map(l => (idsEqual(l.id, updated.id) ? { ...l, ...updated } : l)));
+    setModalLead(prev => (prev && idsEqual(prev.id, updated.id) ? { ...prev, ...updated } : prev));
+  };
+  const onLeadDeleted = (id) => {
+    setLeads(prev => prev.filter(l => !idsEqual(l.id, id)));
+    setModalLead(null);
   };
 
   // Inicializa o mapa quando o Leaflet estiver pronto.
@@ -285,15 +360,31 @@ export default function MapaTab() {
     groupRef.current.addTo(mapInst.current);
     sugGroupRef.current = L.featureGroup().addTo(mapInst.current);
 
-    // Botão "Marcar enviado" dentro dos popups (HTML puro -> listener aqui).
+    // Botões dentro dos popups (HTML puro -> listeners aqui).
     mapInst.current.on('popupopen', (e) => {
-      const btn = e.popup.getElement()?.querySelector('[data-mark]');
-      if (btn) {
-        btn.onclick = () => {
-          markSentRef.current(btn.getAttribute('data-mark'));
-          mapInst.current?.closePopup();
-        };
-      }
+      const el = e.popup.getElement();
+      if (!el) return;
+      const markBtn = el.querySelector('[data-mark]');
+      if (markBtn) markBtn.onclick = () => {
+        markSentRef.current(markBtn.getAttribute('data-mark'));
+        mapInst.current?.closePopup();
+      };
+      const openBtn = el.querySelector('[data-open]');
+      if (openBtn) openBtn.onclick = () => {
+        const lead = leadsByIdRef.current.get(openBtn.getAttribute('data-open'));
+        mapInst.current?.closePopup();
+        if (lead) openLeadRef.current(lead);
+      };
+      const mineBtn = el.querySelector('[data-mine-query], [data-mine]');
+      if (mineBtn) mineBtn.onclick = (event) => {
+        if (event && (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) return true;
+        event?.preventDefault();
+        const encoded = mineBtn.getAttribute('data-mine-query');
+        const query = encoded ? readDataAttr(encoded) : mineBtn.getAttribute('data-mine');
+        startMineQuery(query);
+        mapInst.current?.closePopup();
+        return false;
+      };
     });
 
     setMapReady(x => x + 1);
@@ -323,6 +414,12 @@ export default function MapaTab() {
         icon: pointIcon(L, pref.color, contacted),
         __theme: { key, color: pref.color, contacted },
       });
+      // Nome da empresa ao passar o mouse (sem precisar clicar).
+      const name = escapeHtml(l.name || 'Sem nome');
+      const tip = l.category
+        ? `<b>${escapeHtml(l.category)}:</b> ${name}`
+        : `<b>${name}</b>`;
+      m.bindTooltip(tip, { direction: 'top', offset: [0, -8] });
       m.bindPopup(popupHtml(l, contacted));
       markers.push(m);
     });
@@ -587,6 +684,16 @@ export default function MapaTab() {
           controls={sugControls}
           onControls={patch => setSugControls(prev => ({ ...prev, ...patch }))}
           onFocus={focusMuni}
+        />
+      )}
+
+      {/* Ficha completa da empresa ao clicar num ponto do mapa */}
+      {modalLead && (
+        <LeadModal
+          lead={modalLead}
+          onClose={() => setModalLead(null)}
+          onUpdated={onLeadUpdated}
+          onDeleted={onLeadDeleted}
         />
       )}
     </div>

@@ -152,6 +152,22 @@ export const api = {
     return { success: true, data: all };
   },
 
+  // ── Um lead completo por id ───────────────────────────────────────────────
+  // Usado para hidratar a ficha (LeadModal) a partir de uma origem enxuta,
+  // como os pontos do mapa, que só carregam alguns campos.
+  getLead: async (id) => {
+    if (id === undefined || id === null || id === '') {
+      return { success: false, data: null };
+    }
+    const { data, error } = await supabase
+      .from('results')
+      .select('*, searches(filename,keyword,city)')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return { success: !!data, data: data ? flattenLead(data) : null };
+  },
+
   // ── Mutações de lead ──────────────────────────────────────────────────────
   updateResultStatus: async (id, status) => {
     const patch = { prospect_status: status };

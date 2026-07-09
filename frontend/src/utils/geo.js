@@ -5,6 +5,58 @@
 import { themeKeyOf } from './themeColors';
 import { isContacted } from '../statuses';
 
+const GMAPS_SEARCH_BASE = 'https://www.google.com/maps/search/';
+
+let bridgeListenerInstalled = false;
+let lastBridgeStatusAt = 0;
+
+function canUseBrowserBridge() {
+  return typeof window !== 'undefined'
+    && typeof document !== 'undefined'
+    && typeof window.postMessage === 'function';
+}
+
+function rememberBridgeStatus() {
+  lastBridgeStatusAt = Date.now();
+}
+
+function ensureBridgeStatusListener() {
+  if (bridgeListenerInstalled || !canUseBrowserBridge()) return;
+  bridgeListenerInstalled = true;
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    const d = event.data;
+    if (d && d.__fm === 'extension' && d.action === 'status' && d.installed) {
+      rememberBridgeStatus();
+    }
+  });
+}
+
+ensureBridgeStatusListener();
+
+export function requestExtensionStatus() {
+  if (!canUseBrowserBridge()) return false;
+  ensureBridgeStatusListener();
+  try {
+    window.postMessage({ __fm: 'site', action: 'getExtensionStatus' }, '*');
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+export function hasExtensionBridge() {
+  if (!canUseBrowserBridge()) return false;
+  ensureBridgeStatusListener();
+  const hasMarker = document.documentElement.getAttribute('data-fm-extension') === '1';
+  const hasRecentStatus = lastBridgeStatusAt && (Date.now() - lastBridgeStatusAt < 90 * 1000);
+  return !!(hasMarker || hasRecentStatus);
+}
+
+function cleanSearchQuery(query) {
+  return String(query || '').replace(/\s+/g, ' ').trim();
+}
+
 // ── Base de municípios (nome, UF, coords, população) ────────────────────────
 // Formato do JSON: [[codigo_ibge, nome, uf, lat, lng, pop], ...]
 let muniPromise = null;
@@ -160,8 +212,52 @@ export function computeDeepen(visited, densities, { minEst = 0, themeKey = '' } 
   return out.slice(0, 10);
 }
 
-// Link pronto pra abrir o Google Maps já com a busca do tema na cidade —
-// é só ligar a extensão e minerar.
+// Texto da busca "tema em Cidade - UF" — o que a extensão recebe/pesquisa.
+export function gmapsQuery(themeLabel, muni) {
+  const theme = cleanSearchQuery(themeLabel);
+  const city = cleanSearchQuery(muni?.nome);
+  const uf = cleanSearchQuery(muni?.uf);
+  if (!theme || !city) return theme;
+  return cleanSearchQuery(`${theme} em ${city}${uf ? ` - ${uf}` : ''}`);
+}
+
+export function gmapsSearchUrlForQuery(query) {
+  const q = cleanSearchQuery(query);
+  return q ? `${GMAPS_SEARCH_BASE}${encodeURIComponent(q)}#fm_auto` : '';
+}
+
+// URL do Google Maps já com a busca e a hash #fm_auto, que faz a extensão
+// iniciar a extração sozinha (fallback para quando não há a ponte da extensão).
 export function gmapsSearchUrl(themeLabel, muni) {
-  return `https://www.google.com/maps/search/${encodeURIComponent(`${themeLabel} em ${muni.nome} - ${muni.uf}`)}`;
+  return gmapsSearchUrlForQuery(gmapsQuery(themeLabel, muni));
+}
+
+// Dispara a mineração AUTOMÁTICA de uma busca, igual ao botão "Minerar" da aba
+// Buscar Leads: se a extensão está presente (marca o <html> com data-fm-extension),
+// usa a mesma ponte (postMessage → extensão abre a janelinha, minera, envia e
+// fecha sozinha). Sem a extensão, abre o Maps com #fm_auto num tab novo.
+export function startMineQuery(query) {
+  const q = cleanSearchQuery(query);
+  const url = gmapsSearchUrlForQuery(q);
+  if (!q) return { ok: false, mode: 'empty', query: q, url };
+  if (!canUseBrowserBridge()) return { ok: false, mode: 'unavailable', query: q, url };
+
+  requestExtensionStatus();
+
+  if (hasExtensionBridge()) {
+    try {
+      window.postMessage({ __fm: 'site', action: 'startSearch', query: q }, '*');
+      return { ok: true, mode: 'bridge', query: q, url };
+    } catch (_) {
+      // If the bridge marker is stale or blocked, fall through to Maps.
+    }
+  }
+
+  window.open(url, '_blank', 'noopener,noreferrer');
+  return { ok: true, mode: 'fallback', query: q, url };
+}
+
+// Conveniência: minera o tema numa cidade (tema + município).
+export function startMineOnMaps(themeLabel, muni) {
+  return startMineQuery(gmapsQuery(themeLabel, muni));
 }

@@ -5,6 +5,24 @@
 // em nome do usuário logado. Assim o amigo faz login UMA vez no site.
 // ============================================================================
 (function () {
+  const manifest = (chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest() : {};
+  const extensionVersion = manifest.version || '';
+  const extensionName = manifest.name || 'Friendly Miner Extractor';
+
+  function publishStatus() {
+    try {
+      document.documentElement.setAttribute('data-fm-extension', '1');
+      document.documentElement.setAttribute('data-fm-extension-version', extensionVersion);
+      window.postMessage({
+        __fm: 'extension',
+        action: 'status',
+        installed: true,
+        version: extensionVersion,
+        name: extensionName,
+      }, '*');
+    } catch (_) {}
+  }
+
   // Encontra a sessão salva pelo supabase-js: chave tipo "sb-<ref>-auth-token".
   function readSession() {
     try {
@@ -41,18 +59,30 @@
   // Envia ao carregar, ao focar a aba e periodicamente (o token é renovado
   // pelo próprio site; relemos o valor atualizado).
   push();
+  publishStatus();
   window.addEventListener('focus', push);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) push(); });
+  window.addEventListener('focus', publishStatus);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      push();
+      publishStatus();
+    }
+  });
   setInterval(push, 4 * 60 * 1000); // a cada 4 min
+  setInterval(publishStatus, 30 * 1000);
 
-  // Marca presença da extensão para o site detectar (aba "Buscar Leads").
-  document.documentElement.setAttribute('data-fm-extension', '1');
+  // Marca presença da extensão para o site detectar (abas "Buscar Leads" e "Atualizações").
+  publishStatus();
 
   // Recebe comandos do site (ex.: iniciar busca) e repassa ao service worker.
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     const d = event.data;
     if (!d || d.__fm !== 'site') return;
+    if (d.action === 'getExtensionStatus') {
+      publishStatus();
+      return;
+    }
     if (d.action === 'startSearch' && d.query) {
       try { chrome.runtime.sendMessage({ action: 'fmStartSearch', data: { query: d.query } }); } catch (_) {}
     }

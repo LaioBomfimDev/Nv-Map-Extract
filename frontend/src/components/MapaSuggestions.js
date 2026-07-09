@@ -1,5 +1,5 @@
 import React from 'react';
-import { gmapsSearchUrl } from '../utils/geo';
+import { gmapsSearchUrl, startMineOnMaps } from '../utils/geo';
 import { Lightbulb, Target, ExternalLink, MapPin } from './Icons';
 
 const num = (v) => (Number(v || 0)).toLocaleString('pt-BR');
@@ -20,12 +20,17 @@ export default function MapaSuggestions({
 }) {
   const labelOf = (tk) => themeOptions.find(t => t.key === tk)?.label || tk;
   const colorOf = (tk) => themeOptions.find(t => t.key === tk)?.color || '#a1a1aa';
+  const mineClick = (themeLabel, muni) => (e) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    startMineOnMaps(themeLabel, muni);
+  };
 
   const card = { background: '#18181b', border: '1px solid #27272a', padding: '10px 12px' };
   const gBtn = {
     background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.35)', color: '#10b981',
     fontSize: 11, fontWeight: 600, padding: '4px 8px', cursor: 'pointer', textDecoration: 'none',
-    display: 'inline-flex', alignItems: 'center', gap: 4,
+    display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'inherit', lineHeight: 'normal',
   };
   const ghostBtn = {
     background: 'transparent', border: '1px solid #27272a', color: '#a1a1aa',
@@ -103,7 +108,13 @@ export default function MapaSuggestions({
                     <span style={{ color: '#52525b' }}> (estimado)</span>
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <a href={gmapsSearchUrl(labelOf(s.ests[0].themeKey), s.muni)} target="_blank" rel="noreferrer" style={gBtn}>
+                    <a
+                      href={gmapsSearchUrl(labelOf(s.ests[0].themeKey), s.muni)}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={mineClick(labelOf(s.ests[0].themeKey), s.muni)}
+                      style={gBtn}
+                    >
                       <ExternalLink size={11} /> Minerar no Google Maps
                     </a>
                     <button onClick={() => onFocus(s.muni)} style={ghostBtn}>
@@ -133,7 +144,13 @@ export default function MapaSuggestions({
                     você nunca buscou esse tema aqui · <span style={{ fontWeight: 600, color: '#fafafa' }}>~{num(d.est)}</span> estimados
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <a href={gmapsSearchUrl(labelOf(d.themeKey), d.muni)} target="_blank" rel="noreferrer" style={gBtn}>
+                    <a
+                      href={gmapsSearchUrl(labelOf(d.themeKey), d.muni)}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={mineClick(labelOf(d.themeKey), d.muni)}
+                      style={gBtn}
+                    >
                       <ExternalLink size={11} /> Minerar no Google Maps
                     </a>
                     <button onClick={() => onFocus(d.muni)} style={ghostBtn}>

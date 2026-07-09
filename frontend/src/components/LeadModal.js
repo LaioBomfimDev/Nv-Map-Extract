@@ -1,7 +1,29 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api';
 import { STATUS_OPTIONS, getStatusMeta, getWhatsAppUrl, leadScore, scoreBadge, timeSince } from '../statuses';
 import { Phone, Mail, Globe, MapPin, Star, Tag, Share2, Instagram, Facebook, Linkedin, Twitter, Youtube, StickyNote, MessageCircle, Pin, Send, Calendar, Trash2, StarFilled, Map, X, DynIcon } from './Icons';
+
+function firstValue(value) {
+  return String(value ?? '').split(',')[0].trim();
+}
+
+function safeExternalUrl(value) {
+  const raw = firstValue(value);
+  if (!raw) return '';
+  const candidate = /^[a-z][a-z\d+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const url = new URL(candidate);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function safeMailto(value) {
+  const email = firstValue(value);
+  if (!/^[^@\s<>"']+@[^@\s<>"']+\.[^@\s<>"']+$/.test(email)) return '';
+  return `mailto:${email}`;
+}
 
 // Modal com a ficha completa da empresa: contatos, status do funil,
 // anotações e ações rápidas (WhatsApp, salvar pra depois, apagar).
@@ -12,14 +34,31 @@ export default function LeadModal({ lead, onClose, onUpdated, onDeleted }) {
   const [savingNotes, setSavingNotes] = useState(false);
   const [askSent, setAskSent]     = useState(false);
   const [lastContact, setLastContact] = useState(lead?.last_contact_at || null);
+  const touched = useRef({ status: false, notes: false });
+  const leadId = lead?.id;
+  const leadStatus = lead?.prospect_status;
+  const leadNotes = lead?.notes;
+  const leadLastContact = lead?.last_contact_at;
 
   useEffect(() => {
+    touched.current = { status: false, notes: false };
     setStatus(lead?.prospect_status || 'novo');
     setNotes(lead?.notes || '');
     setLastContact(lead?.last_contact_at || null);
     setAskSent(false);
     setNotesSaved(false);
-  }, [lead]);
+  }, [leadId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (leadId === undefined || leadId === null) return;
+    if (!touched.current.status) {
+      setStatus(leadStatus || 'novo');
+      setLastContact(leadLastContact || null);
+    }
+    if (!touched.current.notes) {
+      setNotes(leadNotes || '');
+    }
+  }, [leadId, leadStatus, leadNotes, leadLastContact]);
 
   const escHandler = useCallback((e) => { if (e.key === 'Escape') onClose(); }, [onClose]);
   useEffect(() => {
@@ -30,20 +69,26 @@ export default function LeadModal({ lead, onClose, onUpdated, onDeleted }) {
   if (!lead) return null;
 
   const waUrl = getWhatsAppUrl(lead.phone);
+  const emailHref = safeMailto(lead.email);
+  const websiteHref = safeExternalUrl(lead.website);
   const score = leadScore(lead);
   const badge = scoreBadge(score);
   const meta = getStatusMeta(status);
 
   async function changeStatus(newStatus) {
     const prev = status;
+    const prevLastContact = lastContact;
+    const nextLastContact = newStatus === 'enviado' ? new Date().toISOString() : lastContact;
+    touched.current.status = true;
     setStatus(newStatus);
-    if (newStatus === 'enviado') setLastContact(new Date().toISOString());
+    if (newStatus === 'enviado') setLastContact(nextLastContact);
     try {
       await api.updateLead(lead.id, { status: newStatus });
-      onUpdated?.({ ...lead, prospect_status: newStatus, notes, last_contact_at: newStatus === 'enviado' ? new Date().toISOString() : lastContact });
+      onUpdated?.({ ...lead, prospect_status: newStatus, notes, last_contact_at: nextLastContact });
       setAskSent(false);
     } catch {
       setStatus(prev);
+      setLastContact(prevLastContact);
     }
   }
 
@@ -59,7 +104,7 @@ export default function LeadModal({ lead, onClose, onUpdated, onDeleted }) {
   }
 
   async function deleteLead() {
-    if (!window.confirm(`Apagar "${lead.name}" definitivamente?`)) return;
+    if (!window.confirm(`Apagar "${lead.name || 'este lead'}" definitivamente?`)) return;
     try {
       await api.bulkDelete([lead.id]);
       onDeleted?.(lead.id);
@@ -78,7 +123,7 @@ export default function LeadModal({ lead, onClose, onUpdated, onDeleted }) {
     { key: 'linkedin',  icon: <Linkedin size={12} />,  label: 'LinkedIn',  url: lead.linkedin },
     { key: 'twitter',   icon: <Twitter size={12} />,   label: 'Twitter/X', url: lead.twitter },
     { key: 'youtube',   icon: <Youtube size={12} />,   label: 'YouTube',   url: lead.youtube },
-  ].filter(s => s.url);
+  ].map(s => ({ ...s, href: safeExternalUrl(s.url) })).filter(s => s.href);
 
   const infoRow = { display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid #18181b', fontSize: 13 };
   const infoLabel = { color: '#52525b', width: 92, flexShrink: 0, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 };
@@ -210,8 +255,8 @@ export default function LeadModal({ lead, onClose, onUpdated, onDeleted }) {
                 <Mail size={13} color="#52525b" />
                 <span>E-mail</span>
               </span>
-              {lead.email
-                ? <a href={`mailto:${lead.email.split(',')[0].trim()}`} style={linkStyle} title={lead.email}>{lead.email}</a>
+              {emailHref
+                ? <a href={emailHref} style={linkStyle} title={lead.email}>{lead.email}</a>
                 : <span style={{ color: '#52525b' }}>—</span>}
             </div>
             <div style={infoRow}>
@@ -219,9 +264,13 @@ export default function LeadModal({ lead, onClose, onUpdated, onDeleted }) {
                 <Globe size={13} color="#52525b" />
                 <span>Site</span>
               </span>
-              {lead.website
-                ? <a href={lead.website} target="_blank" rel="noreferrer" style={linkStyle} title={lead.website}>{lead.website}</a>
-                : <span style={{ color: '#52525b' }}>—</span>}
+              {websiteHref ? (
+                <a href={websiteHref} target="_blank" rel="noreferrer" style={linkStyle} title={lead.website}>{lead.website}</a>
+              ) : (
+                <span style={{ color: lead.website ? '#a1a1aa' : '#52525b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {lead.website || '—'}
+                </span>
+              )}
             </div>
             <div style={infoRow}>
               <span style={infoLabel}>
@@ -267,7 +316,7 @@ export default function LeadModal({ lead, onClose, onUpdated, onDeleted }) {
                 </span>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   {socials.map(s => (
-                    <a key={s.key} href={s.url.split(',')[0].trim()} target="_blank" rel="noreferrer"
+                    <a key={s.key} href={s.href} target="_blank" rel="noreferrer"
                        style={{ fontSize: 12, color: '#10b981', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                       {s.icon} <span>{s.label}</span>
                     </a>
@@ -285,7 +334,7 @@ export default function LeadModal({ lead, onClose, onUpdated, onDeleted }) {
             </label>
             <textarea
               value={notes}
-              onChange={e => setNotes(e.target.value)}
+              onChange={e => { touched.current.notes = true; setNotes(e.target.value); }}
               placeholder="Ex: Falei com a dona, pediu pra chamar semana que vem..."
               rows={3}
               style={{
