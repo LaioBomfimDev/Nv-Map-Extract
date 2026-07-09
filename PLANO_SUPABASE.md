@@ -1,5 +1,8 @@
 # Plano: Friendly Miner Online (Extensão → Supabase → Vercel)
 
+> Status: plano histórico. A migração principal para Supabase/Vercel já foi
+> implementada; mantenha este documento como registro da decisão arquitetural.
+
 **Objetivo:** amigos abrem um site (Vercel), fazem login com Google, e cada um vê os
 próprios leads. A mineração roda de graça na extensão do navegador de cada um (IP
 residencial → sem bloqueio, sem custo de API). Ver os leads funciona até no celular.
@@ -54,8 +57,8 @@ Descobertas ao ler o código atual:
   `name, phone, website, address, instagram, facebook, linkedin, twitter, youtube, ...`.
 - **A extensão já enriquece sozinha.** `bg.js` tem as ações `email`/`access` que visitam
   o site do lead pelo service worker e extraem e-mail/redes. **Não precisa de backend pra isso.**
-- **O único elo com o backend local** é `bg.js → sendToDashboard → POST localhost:5000/api/upload-direct`.
-  É só esse ponto que muda: em vez de mandar pro localhost, manda pro Supabase.
+- **O elo antigo com o backend local já foi removido.** `bg.js → sendToDashboard`
+  agora envia os leads para o Supabase em nome do usuário autenticado.
 - **O frontend fala com o backend por um só arquivo:** `frontend/src/api/index.js` expõe um
   objeto `api` com ~20 funções (`getSearches`, `getLeads`, `updateLead`, `bulkDelete`, ...).
   Os componentes React chamam só esse `api`. Trocando a implementação dessas 20 funções por
@@ -71,7 +74,7 @@ pessoa só enxerga o que é seu.
 **Tabela `searches`** (uma linha por mineração feita)
 - `id` uuid pk
 - `user_id` uuid → auth.users (dono)
-- `keyword`, `city`, `source` ('extensao')
+- `keyword`, `city`, `source` ('extension')
 - `created_at`
 
 **Tabela `results`** (os leads) — mesmos campos de hoje + dono:
@@ -140,10 +143,9 @@ pelo jeito simples.
 - **`authBridge.js`** [NEW]
   - Content script que roda **no domínio da Vercel**, lê a sessão do Supabase no `localStorage`
     e envia pro `bg.js` guardar.
-- **`bg.js`** [MODIFY]
-  - Trocar `sendToDashboard`: em vez de `POST localhost:5000/api/upload-direct`, inserir em
-    `searches` + `results` via REST do Supabase (`POST /rest/v1/...`), com o `Bearer` token do
-    usuário e a `apikey` anon do projeto. Marcar `user_id`.
+- **`bg.js`** [IMPLEMENTED]
+  - `sendToDashboard` insere em `searches` + `results` via Supabase, com o token
+    `Bearer` do usuário e a `apikey` anon do projeto.
   - Manter as ações `email`/`access` (enriquecimento) como estão.
 - **`popup.js` / `popup.html`** [MODIFY]
   - Trocar o campo "URL do dashboard/localhost" por um status: "Conectado como fulano@gmail

@@ -2,9 +2,35 @@
 // MAPS SEARCH EXTRACTOR — Dashboard JS (página de resultados)
 // ================================================================
 
-const DEFAULT_URL = 'http://localhost:5000/api';
 let allLeads = [];
 let filtered = [];
+
+function firstCsvValue(value) {
+    return String(value ?? '').split(',')[0].trim();
+}
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    }[char]));
+}
+
+function safeExternalUrl(value) {
+    let raw = firstCsvValue(value);
+    if (!raw) return '';
+    if (raw.startsWith('//')) raw = `https:${raw}`;
+    const candidate = /^[a-z][a-z\d+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+    try {
+        const url = new URL(candidate);
+        return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+    } catch (_) {
+        return '';
+    }
+}
 
 // ——— Carregar leads do storage ———————————————————————————————————
 chrome.storage.local.get({ leads: [] }, ({ leads }) => {
@@ -62,25 +88,31 @@ function renderTable(leads) {
     leads.forEach(l => {
         const tr = document.createElement('tr');
 
-        const ratingStars = l.averageRating
-            ? `<span class="rating">★ ${Number(l.averageRating).toFixed(1)}</span>`
+        const rating = Number(l.averageRating);
+        const ratingStars = Number.isFinite(rating) && rating > 0
+            ? `<span class="rating">★ ${rating.toFixed(1)}</span>`
             : '—';
 
-        const emailBadge = l.email
-            ? `<span class="badge-email" title="${l.email}">✓ email</span>`
+        const email = firstCsvValue(l.email);
+        const websiteUrl = safeExternalUrl(l.website);
+        const instagramUrl = safeExternalUrl(l.instagram);
+        const linkedinUrl = safeExternalUrl(l.linkedin);
+
+        const emailBadge = email
+            ? `<span class="badge-email" title="${escapeHtml(email)}">✓ email</span>`
             : '—';
 
         tr.innerHTML = `
-            <td title="${l.name || ''}">${l.name || '—'}</td>
-            <td title="${l.category || ''}">${l.category || '—'}</td>
-            <td>${l.phone || '—'}</td>
-            <td title="${l.address || ''}">${l.address || '—'}</td>
-            <td>${l.website ? `<a href="${l.website}" target="_blank">🔗 Site</a>` : '—'}</td>
+            <td title="${escapeHtml(l.name || '')}">${escapeHtml(l.name || '—')}</td>
+            <td title="${escapeHtml(l.category || '')}">${escapeHtml(l.category || '—')}</td>
+            <td>${escapeHtml(l.phone || '—')}</td>
+            <td title="${escapeHtml(l.address || '')}">${escapeHtml(l.address || '—')}</td>
+            <td>${websiteUrl ? `<a href="${escapeHtml(websiteUrl)}" target="_blank" rel="noreferrer">🔗 Site</a>` : '—'}</td>
             <td>${emailBadge}</td>
             <td>${ratingStars}</td>
-            <td>${l.reviewCount || l.reviews_count || '—'}</td>
-            <td>${l.instagram ? `<a href="${l.instagram}" target="_blank">@ig</a>` : '—'}</td>
-            <td>${l.linkedin  ? `<a href="${l.linkedin}"  target="_blank">in</a>`  : '—'}</td>
+            <td>${escapeHtml(l.reviewCount || l.reviews_count || '—')}</td>
+            <td>${instagramUrl ? `<a href="${escapeHtml(instagramUrl)}" target="_blank" rel="noreferrer">@ig</a>` : '—'}</td>
+            <td>${linkedinUrl ? `<a href="${escapeHtml(linkedinUrl)}" target="_blank" rel="noreferrer">in</a>` : '—'}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -141,10 +173,4 @@ document.getElementById('btnClear').addEventListener('click', () => {
 // ——— Helpers —————————————————————————————————————————————————
 function setStatus(msg) {
     document.getElementById('statusMsg').textContent = msg;
-}
-
-function getConfig() {
-    return new Promise(resolve => {
-        chrome.storage.sync.get({ dashboardUrl: DEFAULT_URL }, resolve);
-    });
 }

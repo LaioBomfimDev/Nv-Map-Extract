@@ -31,9 +31,8 @@ echo "✅ Dependências instaladas com sucesso"
 # Verificar variáveis de ambiente
 echo "🔧 Verificando variáveis de ambiente..."
 echo "NODE_ENV: $NODE_ENV"
-echo "REACT_APP_API_URL: $REACT_APP_API_URL"
-echo "REACT_APP_NAME: $REACT_APP_NAME"
-echo "REACT_APP_VERSION: $REACT_APP_VERSION"
+echo "REACT_APP_SUPABASE_URL: ${REACT_APP_SUPABASE_URL:+configurado}"
+echo "REACT_APP_SUPABASE_ANON_KEY: ${REACT_APP_SUPABASE_ANON_KEY:+configurada}"
 
 # Executar build
 echo "🔨 Executando build..."
