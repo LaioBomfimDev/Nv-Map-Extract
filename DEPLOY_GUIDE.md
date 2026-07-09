@@ -1,117 +1,86 @@
-# 🚀 Guia de Deploy no Vercel
+# Guia de Deploy no Vercel
 
-Este guia explica como fazer o deploy automático do Maps Search Dashboard no Vercel.
+Este projeto publica o frontend React na Vercel e usa Supabase para banco, autenticacao, RLS e funcoes SQL. Nao ha backend Node no fluxo atual de producao.
 
-## 📋 Pré-requisitos
+## Pre-requisitos
 
-- Conta no [Vercel](https://vercel.com)
-- Conta no GitHub (já configurada)
-- Repositório GitHub criado (✅ Concluído)
+- Conta na Vercel
+- Repositorio GitHub conectado
+- Projeto Supabase criado
+- `supabase/schema.sql` executado no SQL Editor do Supabase
 
-## 🔧 Configuração do Deploy
+## Configuracao do Projeto
 
-### 1. Conectar ao Vercel
+No Vercel, importe o repositorio e use:
 
-1. Acesse [vercel.com](https://vercel.com) e faça login
-2. Clique em **"New Project"**
-3. Conecte sua conta do GitHub
-4. Selecione o repositório: `LaioBomfimDev/mapssearch-dashboard`
-
-### 2. Configurações do Projeto
-
-**Framework Preset:** `Create React App`
-
-**Build and Output Settings:**
-- Build Command: `cd frontend && npm install && npm run build`
+- Framework Preset: `Create React App`
+- Install Command: `cd frontend && npm ci`
+- Build Command: `cd frontend && npm run build`
 - Output Directory: `frontend/build`
-- Install Command: `npm install`
 
-### 3. Variáveis de Ambiente
+O arquivo `vercel.json` ja declara esses comandos.
 
-Na seção **Environment Variables**, adicione:
+## Variaveis de Ambiente
 
+Configure na Vercel:
+
+```text
+REACT_APP_SUPABASE_URL=https://SEU-PROJETO.supabase.co
+REACT_APP_SUPABASE_ANON_KEY=SUA_CHAVE_ANON_PUBLIC
 ```
-REACT_APP_API_URL=https://seu-backend-url.vercel.app
-REACT_APP_NAME=Maps Search Dashboard
-REACT_APP_VERSION=1.0.0
-NODE_ENV=production
+
+Depois de alterar variaveis, faca um redeploy.
+
+## Supabase Auth
+
+Em `Authentication > URL Configuration`:
+
+- Site URL: URL final da Vercel
+- Redirect URLs: inclua a URL final da Vercel e a URL local usada em desenvolvimento
+
+No provedor Google, o redirect autorizado no Google Cloud deve apontar para:
+
+```text
+https://SEU-PROJETO.supabase.co/auth/v1/callback
 ```
 
-### 4. Deploy Automático
+## Teste Local Antes do Deploy
 
-Após a configuração:
-- ✅ O Vercel fará o primeiro deploy automaticamente
-- ✅ Cada push na branch `main` acionará um novo deploy
-- ✅ Preview deployments para outras branches
-
-## 🌐 URLs de Acesso
-
-Após o deploy:
-- **Frontend:** `https://mapssearch-dashboard.vercel.app`
-- **Preview:** `https://mapssearch-dashboard-git-[branch].vercel.app`
-
-## 🔄 Deploy do Backend (Opcional)
-
-Para deploy completo com backend:
-
-1. **Opção 1 - Railway/Render:**
-   - Conecte o mesmo repositório
-   - Configure para rodar `backend/src/server.js`
-   - Adicione variáveis de ambiente
-
-2. **Opção 2 - Vercel Functions:**
-   - O `vercel.json` já está configurado
-   - Backend será deployado como Serverless Functions
-
-## ⚙️ Configurações Avançadas
-
-### Custom Domain
 ```bash
-# Via Vercel CLI
-npx vercel --prod
-npx vercel domains add seu-dominio.com
-```
-
-### Monitoramento
-- Analytics automático do Vercel
-- Logs de build e runtime
-- Performance insights
-
-## 🐛 Troubleshooting
-
-### Build Falha
-```bash
-# Teste local
 cd frontend
-npm install
+npm ci
 npm run build
 ```
 
-### Variáveis de Ambiente
-- Verifique se todas as `REACT_APP_*` estão definidas
-- Redeploy após mudanças nas variáveis
+Para desenvolvimento:
 
-### CORS Issues
-- Configure CORS no backend para aceitar o domínio do Vercel
-- Atualize `REACT_APP_API_URL` para a URL correta do backend
+```bash
+cd frontend
+npm start
+```
 
-## 📱 Recursos Automáticos
+## Extensao
 
-✅ **HTTPS automático**
-✅ **CDN global**
-✅ **Compressão automática**
-✅ **Cache otimizado**
-✅ **Preview deployments**
-✅ **Rollback instantâneo**
+Atualize `extension/config.js` com:
 
-## 🎯 Próximos Passos
+```js
+SUPABASE_URL: 'https://SEU-PROJETO.supabase.co',
+SUPABASE_ANON_KEY: 'SUA_CHAVE_ANON_PUBLIC',
+APP_URL: 'https://SEU-APP.vercel.app',
+```
 
-1. Configure domínio customizado
-2. Configure analytics
-3. Configure alertas de uptime
-4. Otimize performance com Vercel Analytics
+No `extension/manifest.json`, confirme que o content script do `authBridge.js` permite a URL da Vercel e a URL local de desenvolvimento.
 
----
+## Troubleshooting
 
-**🚀 Deploy Status:** ✅ Pronto para deploy
-**📝 Última atualização:** 2025-01-16
+| Sintoma | Causa provável | Solução |
+|---|---|---|
+| Build falha | Dependencia ou erro de React | Rode `cd frontend && npm run build` localmente |
+| Login volta para a tela inicial | Redirect URL ausente no Supabase | Adicione a URL da Vercel em `Redirect URLs` |
+| Dados nao carregam | Variaveis Supabase ausentes ou erradas | Confira `REACT_APP_SUPABASE_URL` e `REACT_APP_SUPABASE_ANON_KEY` |
+| Extensao nao conecta | `APP_URL` ou `manifest.json` aponta para outro dominio | Atualize a configuracao da extensao |
+| Usuario ve dados de outro | RLS ausente | Rode novamente `supabase/schema.sql` e confira as policies |
+
+## Backend Legado
+
+A pasta `backend/` pertence a arquitetura antiga Express/SQLite/FileWatcher. Ela nao deve ser publicada nem iniciada no deploy atual. Se precisar consultar ou testar esse fluxo antigo, use o script `legacy:backend` na raiz.

@@ -84,7 +84,7 @@ export default function LeadModal({ lead, onClose, onUpdated, onDeleted }) {
     if (newStatus === 'enviado') setLastContact(nextLastContact);
     try {
       await api.updateLead(lead.id, { status: newStatus });
-      onUpdated?.({ ...lead, prospect_status: newStatus, notes, last_contact_at: nextLastContact });
+      onUpdated?.({ ...lead, prospect_status: newStatus, last_contact_at: nextLastContact });
       setAskSent(false);
     } catch {
       setStatus(prev);

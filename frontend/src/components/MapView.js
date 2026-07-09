@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import loadLeaflet from '../utils/loadLeaflet';
+import { escapeHtml, safeExternalUrl } from '../utils/safeUrl';
 
 export default function MapView({ leads }) {
     const mapRef = useRef(null);
@@ -77,20 +78,21 @@ export default function MapView({ leads }) {
             const whatsappLink = formattedPhone 
                 ? `https://wa.me/${formattedPhone.startsWith('55') ? formattedPhone : '55' + formattedPhone}` 
                 : null;
+            const websiteUrl = safeExternalUrl(lead.website);
 
             const popupContent = `
                 <div style="font-family: 'Inter', sans-serif; color: #fafafa; padding: 6px; min-width: 190px; background: #18181b;">
-                    <h4 style="margin: 0 0 4px 0; font-size: 13px; font-weight: 700; color: #fafafa;">${lead.name}</h4>
-                    <p style="margin: 0 0 6px 0; font-size: 11px; color: #a1a1aa;">Categoria: ${lead.category || 'Sem categoria'}</p>
-                    <p style="margin: 0 0 8px 0; font-size: 11px; color: #52525b;">Endereço: ${lead.address || 'Sem endereço'}</p>
+                    <h4 style="margin: 0 0 4px 0; font-size: 13px; font-weight: 700; color: #fafafa;">${escapeHtml(lead.name || 'Sem nome')}</h4>
+                    <p style="margin: 0 0 6px 0; font-size: 11px; color: #a1a1aa;">Categoria: ${escapeHtml(lead.category || 'Sem categoria')}</p>
+                    <p style="margin: 0 0 8px 0; font-size: 11px; color: #52525b;">Endereço: ${escapeHtml(lead.address || 'Sem endereço')}</p>
                     <div style="display: flex; gap: 6px;">
                         ${whatsappLink ? `
-                            <a href="${whatsappLink}" target="_blank" style="background: #10b981; color: #fff; padding: 4px 8px; border-radius: 0px; font-size: 11px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                            <a href="${whatsappLink}" target="_blank" rel="noreferrer" style="background: #10b981; color: #fff; padding: 4px 8px; border-radius: 0px; font-size: 11px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
                                 WhatsApp
                             </a>
                         ` : ''}
-                        ${lead.website ? `
-                            <a href="${lead.website}" target="_blank" style="background: #06b6d4; color: #fff; padding: 4px 8px; border-radius: 0px; font-size: 11px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                        ${websiteUrl ? `
+                            <a href="${escapeHtml(websiteUrl)}" target="_blank" rel="noreferrer" style="background: #06b6d4; color: #fff; padding: 4px 8px; border-radius: 0px; font-size: 11px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
                                 Site
                             </a>
                         ` : ''}

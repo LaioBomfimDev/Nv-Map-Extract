@@ -2,7 +2,8 @@
 // O "tema" de um lead vem da keyword da busca que o trouxe (ex.: "clínicas",
 // "academias"). Cada tema ganha uma cor automaticamente na primeira vez que
 // aparece; o usuário pode renomear, trocar a cor ou ocultar pela legenda.
-// As preferências ficam salvas no localStorage (por navegador).
+// As preferências ficam salvas no localStorage (resposta imediata) e, quando o
+// usuário está autenticado, sincronizadas no Supabase pela aba Mapa.
 
 // Paleta escolhida para bom contraste sobre o mapa escuro (CartoDB dark).
 export const THEME_PALETTE = [
@@ -32,12 +33,12 @@ export function themeLabelOf(keyword) {
   return k || 'Sem tema';
 }
 
-const LS_KEY = 'mapa_theme_prefs_v1';
+export const THEME_PREFS_KEY = 'mapa_theme_prefs_v1';
 
 // Formato salvo: { [themeKey]: { color, label, hidden } }
 export function loadThemePrefs() {
   try {
-    return JSON.parse(localStorage.getItem(LS_KEY)) || {};
+    return JSON.parse(localStorage.getItem(THEME_PREFS_KEY)) || {};
   } catch {
     return {};
   }
@@ -45,7 +46,7 @@ export function loadThemePrefs() {
 
 export function saveThemePrefs(prefs) {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(prefs));
+    localStorage.setItem(THEME_PREFS_KEY, JSON.stringify(prefs));
   } catch {
     /* localStorage indisponível — segue sem persistir */
   }

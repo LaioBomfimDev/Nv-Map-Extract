@@ -17,7 +17,7 @@ create table if not exists public.searches (
   city          text,
   total_results int  default 0,
   status        text default 'completed',
-  source        text default 'extensao',
+  source        text default 'extension',
   created_at    timestamptz default now()
 );
 
@@ -58,12 +58,23 @@ create table if not exists public.ignored_leads (
   created_at timestamptz default now()
 );
 
+create table if not exists public.user_prefs (
+  user_id    uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  key        text not null,
+  value      jsonb not null default '{}'::jsonb,
+  updated_at timestamptz default now(),
+  primary key (user_id, key)
+);
+
+alter table public.searches alter column source set default 'extension';
+
 -- ── Índices ─────────────────────────────────────────────────────────────────
 create index if not exists idx_results_user      on public.results (user_id);
 create index if not exists idx_results_search     on public.results (search_id);
 create index if not exists idx_results_status     on public.results (user_id, prospect_status);
 create index if not exists idx_searches_user      on public.searches (user_id, created_at desc);
 create index if not exists idx_ignored_user       on public.ignored_leads (user_id);
+create index if not exists idx_user_prefs_user    on public.user_prefs (user_id);
 -- Dedupe por lugar (por usuário), ignorando place_id vazio
 create unique index if not exists uq_results_user_place
   on public.results (user_id, place_id)
@@ -73,11 +84,12 @@ create unique index if not exists uq_results_user_place
 alter table public.searches      enable row level security;
 alter table public.results       enable row level security;
 alter table public.ignored_leads enable row level security;
+alter table public.user_prefs    enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['searches','results','ignored_leads'] loop
+  foreach t in array array['searches','results','ignored_leads','user_prefs'] loop
     execute format('drop policy if exists "own_select" on public.%I', t);
     execute format('drop policy if exists "own_insert" on public.%I', t);
     execute format('drop policy if exists "own_update" on public.%I', t);
@@ -109,6 +121,7 @@ declare
   v_lead      jsonb;
   v_name text; v_phone text; v_addr text; v_site text; v_email text;
   v_place text; v_cid text; v_cat text;
+  v_raw text;
   v_rating real; v_reviews int; v_lat real; v_lng real;
   v_ig text; v_fb text; v_in text; v_tw text; v_yt text;
   v_existing public.results%rowtype;
@@ -121,7 +134,7 @@ begin
   insert into public.searches (user_id, filename, keyword, city, total_results, status, source)
   values (v_uid,
           coalesce(nullif(p_keyword,''),'maps') || ' ' || coalesce(p_city,''),
-          nullif(p_keyword,''), nullif(p_city,''), 0, 'completed', 'extensao')
+          nullif(p_keyword,''), nullif(p_city,''), 0, 'completed', 'extension')
   returning id into v_search_id;
 
   for v_lead in select * from jsonb_array_elements(coalesce(p_leads,'[]'::jsonb))
@@ -135,10 +148,18 @@ begin
     v_place := coalesce(v_lead->>'placeID', v_lead->>'place_id','');
     v_cid   := coalesce(v_lead->>'cID', v_lead->>'cid','');
     v_cat   := coalesce(v_lead->>'category','');
-    v_rating:= coalesce((v_lead->>'averageRating')::real, (v_lead->>'rating')::real, 0);
-    v_reviews := coalesce((v_lead->>'reviewCount')::int, (v_lead->>'reviews_count')::int, 0);
-    v_lat   := coalesce((v_lead->>'latitude')::real, 0);
-    v_lng   := coalesce((v_lead->>'longitude')::real, 0);
+
+    v_raw := replace(trim(coalesce(nullif(v_lead->>'averageRating',''), nullif(v_lead->>'rating',''), '')), ',', '.');
+    v_rating := case when v_raw ~ '^[+-]?[0-9]+(\.[0-9]+)?$' then v_raw::real else 0 end;
+
+    v_raw := regexp_replace(coalesce(nullif(v_lead->>'reviewCount',''), nullif(v_lead->>'reviews_count',''), ''), '[^0-9]', '', 'g');
+    v_reviews := coalesce(nullif(v_raw, '')::int, 0);
+
+    v_raw := replace(trim(coalesce(nullif(v_lead->>'latitude',''), '')), ',', '.');
+    v_lat := case when v_raw ~ '^[+-]?[0-9]+(\.[0-9]+)?$' then nullif(v_raw::real, 0) else null end;
+
+    v_raw := replace(trim(coalesce(nullif(v_lead->>'longitude',''), '')), ',', '.');
+    v_lng := case when v_raw ~ '^[+-]?[0-9]+(\.[0-9]+)?$' then nullif(v_raw::real, 0) else null end;
     v_ig := coalesce(v_lead->>'instagram',''); v_fb := coalesce(v_lead->>'facebook','');
     v_in := coalesce(v_lead->>'linkedin',''); v_tw := coalesce(v_lead->>'twitter','');
     v_yt := coalesce(v_lead->>'youtube','');
@@ -182,8 +203,8 @@ begin
         youtube   = coalesce(nullif(youtube,''), v_yt),
         rating    = case when v_rating > 0 then v_rating else rating end,
         reviews_count = case when v_reviews > 0 then v_reviews else reviews_count end,
-        latitude  = case when v_lat <> 0 then v_lat else latitude end,
-        longitude = case when v_lng <> 0 then v_lng else longitude end
+        latitude  = case when v_lat is not null then v_lat else latitude end,
+        longitude = case when v_lng is not null then v_lng else longitude end
       where id = v_existing.id;
       v_merged := v_merged + 1;
     else
@@ -338,6 +359,7 @@ begin
 end $$;
 
 -- ── Permissão de execução para usuários logados ─────────────────────────────
+grant select, insert, update, delete on public.user_prefs to authenticated;
 grant execute on function public.import_leads(text, text, jsonb)  to authenticated;
 grant execute on function public.delete_results(uuid[])           to authenticated;
 grant execute on function public.delete_search_smart(uuid)        to authenticated;

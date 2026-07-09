@@ -4,6 +4,7 @@ import useDebouncedValue from '../hooks/useDebounce';
 import MapView from './MapView';
 import LeadModal from './LeadModal';
 import { STATUS_OPTIONS, getWhatsAppUrl } from '../statuses';
+import { safeExternalUrl } from '../utils/safeUrl';
 import {
     Building2, Tag, Activity, Phone, Mail, MapPin, Globe, Star, Share2,
     SlidersHorizontal, Map as MapIcon, Download, Lightbulb, X, Pin, Send,
@@ -19,12 +20,16 @@ function renderSocials(row) {
     if (row.twitter)   socials.push({ key: 'tw', icon: '🐦', url: row.twitter, title: 'Twitter/X' });
     if (row.youtube)   socials.push({ key: 'yt', icon: '🎥', url: row.youtube, title: 'YouTube' });
 
-    if (socials.length === 0) return <span style={{ color: '#52525b' }}>—</span>;
+    const safeSocials = socials
+        .map(s => ({ ...s, href: safeExternalUrl(s.url) }))
+        .filter(s => s.href);
+
+    if (safeSocials.length === 0) return <span style={{ color: '#52525b' }}>—</span>;
 
     return (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {socials.map(s => (
-                <a key={s.key} href={s.url} target="_blank" rel="noreferrer" title={s.title}
+            {safeSocials.map(s => (
+                <a key={s.key} href={s.href} target="_blank" rel="noreferrer" title={s.title}
                    style={{ fontSize: 13, textDecoration: 'none', transition: 'transform 0.15s', display: 'inline-block' }}
                    onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.2)'}
                    onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}>
@@ -39,6 +44,7 @@ function renderSocials(row) {
 // seleção). Antes, marcar 1 checkbox re-renderizava as 50 linhas de uma vez.
 const ResultRow = memo(function ResultRow({ row, isSelected, onToggleSelect, onStatusChange, onOpen }) {
     const waUrl = getWhatsAppUrl(row.phone);
+    const websiteUrl = safeExternalUrl(row.website);
     return (
         <tr style={{ transition: 'background 0.15s', borderBottom: '1px solid #1c1c22' }}
             onMouseEnter={e => e.currentTarget.style.background = 'rgba(16,185,129,0.04)'}
@@ -113,8 +119,8 @@ const ResultRow = memo(function ResultRow({ row, isSelected, onToggleSelect, onS
 
             {/* Website */}
             <td style={{ padding: '14px 16px', color: '#a1a1aa' }}>
-                {row.website
-                    ? <a href={row.website} target="_blank" rel="noreferrer" style={{ color: '#10b981', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                {websiteUrl
+                    ? <a href={websiteUrl} target="_blank" rel="noreferrer" style={{ color: '#10b981', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         <Link2 size={12} />
                         <span>Site</span>
                       </a>

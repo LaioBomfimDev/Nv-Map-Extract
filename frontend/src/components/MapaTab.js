@@ -3,7 +3,7 @@ import { api } from '../api';
 import loadMarkerCluster from '../utils/loadMarkerCluster';
 import loadLeaflet from '../utils/loadLeaflet';
 import {
-  THEME_PALETTE, themeKeyOf, themeLabelOf, loadThemePrefs, saveThemePrefs,
+  THEME_PALETTE, THEME_PREFS_KEY, themeKeyOf, themeLabelOf, loadThemePrefs, saveThemePrefs,
 } from '../utils/themeColors';
 import {
   loadMunicipios, loadUfMesh, computeVisited, computeDensities,
@@ -247,6 +247,23 @@ export default function MapaTab() {
     return () => { cancelled = true; };
   }, []);
 
+  // Preferências do mapa: localStorage dá resposta instantânea, Supabase
+  // sincroniza cores/rótulos entre dispositivos quando houver sessão.
+  useEffect(() => {
+    let cancelled = false;
+    api.getUserPref(THEME_PREFS_KEY)
+      .then(r => {
+        if (cancelled || !r?.success || !r.data || typeof r.data !== 'object') return;
+        setPrefs(prev => {
+          const next = { ...prev, ...r.data };
+          saveThemePrefs(next);
+          return next;
+        });
+      })
+      .catch(() => { /* tabela ausente/offline: mantém localStorage */ });
+    return () => { cancelled = true; };
+  }, []);
+
   const plotted = useMemo(() => leads.filter(hasCoords), [leads]);
 
   // Índice id -> lead para o botão "Abrir ficha" do popup resolver o lead
@@ -283,11 +300,16 @@ export default function MapaTab() {
     themeStats.forEach(s => {
       if (!next[s.key]) { next[s.key] = { color: freeColor(), label: s.label }; changed = true; }
     });
-    if (changed) { setPrefs(next); saveThemePrefs(next); }
+    if (changed) { setPrefs(next); persistThemePrefs(next); }
   }, [themeStats]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const labelOf = (tk) => prefs[tk]?.label || tk;
   const colorOf = (tk) => prefs[tk]?.color || '#a1a1aa';
+
+  function persistThemePrefs(next) {
+    saveThemePrefs(next);
+    api.setUserPref(THEME_PREFS_KEY, next).catch(() => { /* fallback local já salvo */ });
+  }
 
   // ── Inteligência geográfica (fase 3) ─────────────────────────────────────
   const visited = useMemo(
@@ -517,7 +539,7 @@ export default function MapaTab() {
   const patchPref = (key, patch) => {
     setPrefs(prev => {
       const next = { ...prev, [key]: { ...prev[key], ...patch } };
-      saveThemePrefs(next);
+      persistThemePrefs(next);
       return next;
     });
   };

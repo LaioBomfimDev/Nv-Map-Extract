@@ -1,237 +1,79 @@
-# 🚨 Troubleshooting: Production Domain Not Serving Traffic
+# Troubleshooting de Producao
 
-## 🎯 **Problema Identificado**
-**Erro:** "Your Production Domain is not serving traffic"
+Arquitetura atual: Vercel serve o frontend React; Supabase cuida de Auth, Postgres, RLS e funcoes SQL. O backend Express/SQLite e legado.
 
-## 🔍 **Diagnóstico Rápido (5 minutos)**
+## Site nao abre
 
-### 1. Verificar Status do Deploy
-```bash
-# Acesse o dashboard do Vercel
-https://vercel.com/dashboard
+Confira na Vercel:
 
-# Verifique:
-✅ Deploy foi concluído com sucesso?
-✅ Domínio está configurado corretamente?
-✅ SSL certificate foi gerado?
+```text
+Install Command: cd frontend && npm ci
+Build Command: cd frontend && npm run build
+Output Directory: frontend/build
 ```
 
-### 2. Testar Conectividade
-```bash
-# Teste 1: Acesso direto ao domínio Vercel
-curl -I https://mapssearch-dashboard.vercel.app
+Depois faca `Redeploy` sem cache.
 
-# Teste 2: Verificar DNS (Windows)
-nslookup mapssearch-dashboard.vercel.app
+## Tela avisa Supabase nao configurado
 
-# Teste 3: Verificar DNS (alternativo)
-dig @8.8.8.8 mapssearch-dashboard.vercel.app
+Faltam variaveis de ambiente no deploy:
+
+```text
+REACT_APP_SUPABASE_URL
+REACT_APP_SUPABASE_ANON_KEY
 ```
 
-## 🛠️ **Soluções por Ordem de Prioridade**
+Depois de alterar variaveis, faca novo deploy.
 
-### **Solução 1: Verificar Configuração do Projeto** <mcreference link="https://vercel.com/docs/projects/domains/troubleshooting" index="1">1</mcreference>
+## Login Google falha
 
-**Passo 1:** Acesse Vercel Dashboard
-```
-→ https://vercel.com/dashboard
-→ Selecione projeto "mapssearch-dashboard"
-→ Aba "Settings" → "Domains"
-```
+No Supabase, confira:
 
-**Passo 2:** Verificar configurações
-```
-✅ Framework: Create React App
-✅ Build Command: cd frontend && npm install && npm run build
-✅ Output Directory: frontend/build
-✅ Root Directory: ./
+```text
+Authentication > Providers > Google: ativo
+Authentication > URL Configuration > Site URL: URL da Vercel
+Authentication > URL Configuration > Redirect URLs: URL da Vercel
 ```
 
-### **Solução 2: Corrigir Build Command**
+No Google Cloud, o redirect autorizado deve ser:
 
-**Problema comum:** Build command incorreto
-
-**Configuração correta:**
-```json
-{
-  "buildCommand": "cd frontend && npm ci && npm run build",
-  "outputDirectory": "frontend/build",
-  "installCommand": "npm ci"
-}
+```text
+https://SEU-PROJETO.supabase.co/auth/v1/callback
 ```
 
-### **Solução 3: Verificar Variáveis de Ambiente** <mcreference link="https://vercel.com/guides/troubleshooting-connectivity-issues" index="3">3</mcreference>
+## Login funciona, mas dados nao carregam
 
-**No Vercel Dashboard:**
-```
-Settings → Environment Variables
+1. Rode `supabase/schema.sql` inteiro.
+2. Confirme que RLS esta habilitado nas tabelas `searches`, `results` e `ignored_leads`.
+3. Confirme que o usuario esta autenticado.
+4. Veja o console do navegador para mensagens do Supabase.
 
-✅ REACT_APP_API_URL=https://seu-backend.vercel.app
-✅ REACT_APP_NAME=Maps Search Dashboard
-✅ REACT_APP_VERSION=1.0.0
-✅ NODE_ENV=production
-```
+## Extensao nao conecta
 
-### **Solução 4: Limpar Cache e DNS** <mcreference link="https://vercel.com/guides/troubleshooting-connectivity-issues" index="3">3</mcreference>
+1. Abra o painel logado no mesmo navegador.
+2. Confira `extension/config.js`:
 
-**Windows (PowerShell como Admin):**
-```powershell
-# Limpar cache DNS
-ipconfig /flushdns
-
-# Limpar cache do navegador
-# Chrome: Ctrl + Shift + Delete
-# Selecionar "Cached images and files"
+```js
+SUPABASE_URL
+SUPABASE_ANON_KEY
+APP_URL
 ```
 
-**Teste em navegador privado:**
-```
-Chrome: Ctrl + Shift + N
-Firefox: Ctrl + Shift + P
-```
+3. Confirme que `extension/manifest.json` inclui a URL do painel no bloco do `authBridge.js`.
+4. Recarregue a extensao em `chrome://extensions`.
 
-### **Solução 5: Verificar Logs de Build**
+## Leads nao aparecem apos minerar
 
-**No Vercel Dashboard:**
-```
-→ Projeto → Deployments
-→ Clique no deploy mais recente
-→ Aba "Function Logs"
-→ Procure por erros
-```
+1. Veja o popup/status da extensao.
+2. Confirme que o painel estava logado antes da mineracao.
+3. Teste uma busca pequena.
+4. Se o erro for SQL, rode novamente o `schema.sql` atualizado.
 
-**Erros comuns:**
-```bash
-# Erro de dependências
-ERROR: Cannot resolve dependency
+## Coisas que nao resolvem mais
 
-# Erro de build
-ERROR: Build failed
+- Configurar `REACT_APP_API_URL`
+- Publicar `backend/src/server.js` como Vercel Function
+- Rodar SQLite em producao
+- Liberar CORS do backend antigo
 
-# Erro de variáveis
-ERROR: Environment variable not found
-```
-
-### **Solução 6: Redeployar Manualmente**
-
-**Via Vercel CLI:**
-```bash
-# Instalar Vercel CLI
-npm i -g vercel
-
-# Login
-vercel login
-
-# Deploy manual
-vercel --prod
-```
-
-**Via Dashboard:**
-```
-→ Deployments
-→ Três pontos (...) no deploy
-→ "Redeploy"
-```
-
-## 🔧 **Configuração Correta do vercel.json**
-
-```json
-{
-  "version": 2,
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "build"
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/backend/src/server.js"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/frontend/build/index.html"
-    }
-  ],
-  "env": {
-    "NODE_ENV": "production"
-  },
-  "functions": {
-    "backend/src/server.js": {
-      "maxDuration": 30
-    }
-  }
-}
-```
-
-## 🚨 **Soluções de Emergência**
-
-### **Opção 1: Deploy Apenas Frontend**
-```bash
-# Configuração simplificada
-{
-  "buildCommand": "cd frontend && npm ci && npm run build",
-  "outputDirectory": "frontend/build"
-}
-```
-
-### **Opção 2: Usar Netlify (Backup)**
-```bash
-# Se Vercel falhar completamente
-npm install -g netlify-cli
-netlify deploy --prod --dir=frontend/build
-```
-
-## 📊 **Checklist de Verificação**
-
-```
-□ Deploy concluído sem erros
-□ Build command correto
-□ Output directory correto
-□ Variáveis de ambiente configuradas
-□ DNS cache limpo
-□ Testado em navegador privado
-□ Logs verificados
-□ SSL certificate ativo
-□ Domínio verificado
-□ Redeploy realizado
-```
-
-## 🆘 **Quando Contactar Suporte**
-
-Se todas as soluções falharem:
-
-**Vercel Support:**
-- https://vercel.com/help
-- Incluir: URL do projeto, logs de erro, timestamp do problema
-
-**Informações para incluir:**
-```
-- URL do projeto: https://mapssearch-dashboard.vercel.app
-- Repositório: LaioBomfimDev/mapssearch-dashboard
-- Framework: Create React App
-- Erro: Production domain not serving traffic
-- Timestamp: [quando ocorreu]
-- Logs de build: [anexar]
-```
-
-## ⚡ **Solução Rápida (2 minutos)**
-
-**Se você tem pressa:**
-```bash
-1. Vercel Dashboard → Projeto → Settings → General
-2. Alterar "Output Directory" para: frontend/build
-3. Alterar "Build Command" para: cd frontend && npm ci && npm run build
-4. Deployments → Redeploy último deploy
-5. Aguardar 2-3 minutos
-```
-
----
-
-**🎯 Status:** Aguardando implementação das correções
-**⏱️ Tempo estimado:** 5-15 minutos
-**🔄 Última atualização:** 2025-01-16
+Esses passos pertencem a arquitetura antiga e tendem a criar diagnostico falso.

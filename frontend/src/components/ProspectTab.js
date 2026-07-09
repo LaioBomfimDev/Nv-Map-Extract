@@ -88,7 +88,7 @@ export default function ProspectTab() {
     try {
       const res = await api.getProspectSummary();
       if (res.success) setSummary(res.data);
-    } catch { /* backend indisponível */ }
+    } catch { /* Supabase indisponível */ }
   }, []);
 
   // Debounce só no texto digitado; filtros por clique (status/sugestão) seguem na hora.
@@ -108,7 +108,7 @@ export default function ProspectTab() {
         setLeads(res.data.data || []);
         if (res.data.total != null) setTotal(res.data.total);
       }
-    } catch { /* backend indisponível */ }
+    } catch { /* Supabase indisponível */ }
     setLoading(false);
   }, [page, statusFilter, extraFilters, debouncedName]);
 
@@ -116,7 +116,7 @@ export default function ProspectTab() {
     try {
       const res = await api.getIgnored();
       if (res.success) setIgnored(res.data);
-    } catch { /* backend indisponível */ }
+    } catch { /* Supabase indisponível */ }
   }, []);
 
   useEffect(() => { loadSummary(); }, [loadSummary]);

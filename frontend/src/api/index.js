@@ -8,6 +8,13 @@
 // ============================================================================
 import { supabase } from '../supabaseClient';
 
+const MAP_LEADS_CACHE_TTL_MS = 5 * 60 * 1000;
+let mapLeadsCache = { data: null, loadedAt: 0, promise: null };
+
+function clearMapLeadsCache() {
+  mapLeadsCache = { data: null, loadedAt: 0, promise: null };
+}
+
 // Aplica os filtros do frontend (buildResultFilters do backend antigo) numa
 // query do supabase-js. Cada .or() adicional é combinado com AND.
 function applyFilters(q, filters = {}) {
@@ -95,6 +102,7 @@ export const api = {
     // (status != 'novo') e remove o resto — sem deixar "fantasma" no histórico.
     const { data, error } = await supabase.rpc('delete_search_smart', { p_search_id: id });
     if (error) throw error;
+    clearMapLeadsCache();
     return { success: true, data };
   },
   renameSearch: async (id, filename) => {
@@ -134,22 +142,68 @@ export const api = {
   // Traz só os campos que o mapa precisa + o tema (keyword) e a cidade da busca.
   // Pagina em blocos porque o Supabase limita o nº de linhas por request.
   getMapLeads: async () => {
-    const PAGE = 1000;
-    const cols = 'id,name,category,phone,website,address,latitude,longitude,prospect_status,place_id,searches(keyword,city)';
-    let all = [];
-    for (let page = 0; ; page++) {
-      const { data, error } = await supabase
-        .from('results')
-        .select(cols)
-        .not('latitude', 'is', null)
-        .not('longitude', 'is', null)
-        .range(page * PAGE, page * PAGE + PAGE - 1);
-      if (error) throw error;
-      const rows = (data || []).map(flattenLead);
-      all = all.concat(rows);
-      if (rows.length < PAGE) break;
-    }
-    return { success: true, data: all };
+    const fresh = mapLeadsCache.data && (Date.now() - mapLeadsCache.loadedAt < MAP_LEADS_CACHE_TTL_MS);
+    if (fresh) return { success: true, data: mapLeadsCache.data };
+    if (mapLeadsCache.promise) return mapLeadsCache.promise;
+
+    mapLeadsCache.promise = (async () => {
+      const PAGE = 1000;
+      const cols = 'id,name,category,phone,website,address,latitude,longitude,prospect_status,place_id,searches(keyword,city)';
+      let all = [];
+      for (let page = 0; ; page++) {
+        const { data, error } = await supabase
+          .from('results')
+          .select(cols)
+          .not('latitude', 'is', null)
+          .not('longitude', 'is', null)
+          .neq('latitude', 0)
+          .neq('longitude', 0)
+          .order('created_at', { ascending: false })
+          .range(page * PAGE, page * PAGE + PAGE - 1);
+        if (error) throw error;
+        const rows = (data || []).map(flattenLead);
+        all = all.concat(rows);
+        if (rows.length < PAGE) break;
+      }
+      mapLeadsCache = { data: all, loadedAt: Date.now(), promise: null };
+      return { success: true, data: all };
+    })().catch(error => {
+      mapLeadsCache.promise = null;
+      throw error;
+    });
+
+    return mapLeadsCache.promise;
+  },
+  invalidateMapLeadsCache: () => {
+    clearMapLeadsCache();
+    return { success: true };
+  },
+
+  // ── Preferências por usuário ──────────────────────────────────────────────
+  getUserPref: async (key) => {
+    const { data, error } = await supabase
+      .from('user_prefs')
+      .select('value')
+      .eq('key', key)
+      .maybeSingle();
+    if (error) throw error;
+    return { success: true, data: data?.value || null };
+  },
+  setUserPref: async (key, value) => {
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError) throw authError;
+    const userId = authData?.user?.id;
+    if (!userId) return { success: false };
+    const { error } = await supabase
+      .from('user_prefs')
+      .upsert({
+        user_id: userId,
+        key,
+        value,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,key' });
+    if (error) throw error;
+    return { success: true };
   },
 
   // ── Um lead completo por id ───────────────────────────────────────────────
@@ -174,6 +228,7 @@ export const api = {
     if (status === 'enviado') patch.last_contact_at = new Date().toISOString();
     const { error } = await supabase.from('results').update(patch).eq('id', id);
     if (error) throw error;
+    clearMapLeadsCache();
     return { success: true };
   },
   updateLead: async (id, data) => {
@@ -186,6 +241,7 @@ export const api = {
     if (!Object.keys(patch).length) return { success: true };
     const { error } = await supabase.from('results').update(patch).eq('id', id);
     if (error) throw error;
+    clearMapLeadsCache();
     return { success: true };
   },
   bulkStatus: async (ids, status) => {
@@ -193,11 +249,13 @@ export const api = {
     if (status === 'enviado') patch.last_contact_at = new Date().toISOString();
     const { error } = await supabase.from('results').update(patch).in('id', ids);
     if (error) throw error;
+    clearMapLeadsCache();
     return { success: true, changed: ids.length };
   },
   bulkDelete: async (ids) => {
     const { data, error } = await supabase.rpc('delete_results', { p_ids: ids });
     if (error) throw error;
+    clearMapLeadsCache();
     return { success: true, deleted: data || 0 };
   },
 
@@ -222,11 +280,19 @@ export const api = {
   // ── Exportação CSV (client-side) ──────────────────────────────────────────
   // Substitui o antigo href de download do backend. Chamado no onClick.
   exportSearch: async (searchId, filters = {}) => {
-    let q = supabase.from('results').select('*').eq('search_id', searchId);
-    q = applyFilters(q, filters).order('created_at', { ascending: false }).limit(5000);
-    const { data, error } = await q;
-    if (error) throw error;
-    downloadCsv(`leads_${searchId}`, data || []);
+    const PAGE = 1000;
+    let rows = [];
+    for (let page = 0; ; page++) {
+      let q = supabase.from('results').select('*').eq('search_id', searchId);
+      q = applyFilters(q, filters)
+        .order('created_at', { ascending: false })
+        .range(page * PAGE, page * PAGE + PAGE - 1);
+      const { data, error } = await q;
+      if (error) throw error;
+      rows = rows.concat(data || []);
+      if (!data || data.length < PAGE) break;
+    }
+    downloadCsv(`leads_${searchId}`, rows);
     return { success: true };
   },
 
@@ -237,6 +303,7 @@ export const api = {
       p_keyword: keyword || 'planilha', p_city: city || '', p_leads: leads,
     });
     if (error) throw error;
+    clearMapLeadsCache();
     return { success: true, data };
   },
 

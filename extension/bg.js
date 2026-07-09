@@ -5,7 +5,7 @@
 // ================================================================
 
 importScripts('config.js');   // FM_CONFIG (URL + anon key + app url)
-importScripts('js/mybg.js');  // fetchUrlContent, extractemail (enriquecimento)
+importScripts('js/emailExtractor.js');  // fetchUrlContent, extractemail
 
 // ——— Sessão do usuário (recebida do painel via authBridge.js) ———————————————
 async function getStoredAuth() {

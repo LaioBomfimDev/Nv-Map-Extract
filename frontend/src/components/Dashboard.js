@@ -4,6 +4,8 @@ import LeadModal from './LeadModal';
 import { STATUS_OPTIONS, getWhatsAppUrl } from '../statuses';
 import { Search, MapPin, Star, Tag, MessageCircle, Clock, Lightbulb, Building2, TrendingUp, FileText, Plug, FolderOpen, Rocket, Upload, ArrowRight, DynIcon, AlertTriangle } from './Icons';
 
+const isExtensionSource = (source) => ['extension', 'extensao'].includes(String(source || '').toLowerCase());
+
 export default function Dashboard({ onSelectSearch, onGoTo, onImportCSV }) {
     const [metrics, setMetrics] = useState(null);
     const [charts, setCharts] = useState(null);
@@ -29,7 +31,7 @@ export default function Dashboard({ onSelectSearch, onGoTo, onImportCSV }) {
                 if (resSummary.success) setSummary(resSummary.data);
             } catch (e) { /* resumo é opcional */ }
         } catch (e) {
-            setError('Não foi possível conectar ao backend. Verifique se o servidor está rodando na porta 5000.');
+            setError('Não foi possível carregar os dados do Supabase. Verifique login, variáveis de ambiente e conexão.');
         } finally {
             if (!silent) setLoading(false);
         }
@@ -341,13 +343,13 @@ export default function Dashboard({ onSelectSearch, onGoTo, onImportCSV }) {
                                         <td className="mono" style={{ padding: '12px 16px', color: '#a1a1aa' }}>{(s.total_results || 0).toLocaleString('pt-BR')} leads</td>
                                         <td style={{ padding: '12px 16px' }}>
                                             <span style={{ 
-                                                background: s.source === 'extension' ? 'rgba(139,92,246,0.15)' : 'rgba(16,185,129,0.15)', 
-                                                color: s.source === 'extension' ? '#a78bfa' : '#10b981', 
+                                                background: isExtensionSource(s.source) ? 'rgba(139,92,246,0.15)' : 'rgba(16,185,129,0.15)',
+                                                color: isExtensionSource(s.source) ? '#a78bfa' : '#10b981',
                                                 padding: '3px 10px', borderRadius: 0, fontSize: 11, fontWeight: 600,
                                                 display: 'inline-flex', alignItems: 'center', gap: 6
                                             }}>
-                                                {s.source === 'extension' ? <Plug size={12} /> : <FileText size={12} />}
-                                                <span>{s.source === 'extension' ? 'Extensão Chrome' : 'Planilha CSV/Excel'}</span>
+                                                {isExtensionSource(s.source) ? <Plug size={12} /> : <FileText size={12} />}
+                                                <span>{isExtensionSource(s.source) ? 'Extensão Chrome' : 'Planilha CSV/Excel'}</span>
                                             </span>
                                         </td>
                                         <td className="mono" style={{ padding: '12px 16px', color: '#52525b' }}>{new Date(s.created_at).toLocaleDateString('pt-BR')}</td>
