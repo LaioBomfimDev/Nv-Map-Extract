@@ -77,6 +77,43 @@ function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
+function cleanFilters(filters = {}) {
+  const out = {};
+  Object.entries(filters || {}).forEach(([key, value]) => {
+    if (value !== '' && value !== null && value !== undefined) out[key] = value;
+  });
+  return out;
+}
+
+async function fetchLeadIds(filters = {}, maxLeads = 1000) {
+  const PAGE = 1000;
+  const activeFilters = cleanFilters(filters);
+  const ids = [];
+  for (let page = 0; ids.length < maxLeads; page++) {
+    const remaining = maxLeads - ids.length;
+    const size = Math.min(PAGE, remaining);
+    let q = supabase.from('results').select('id');
+    q = applyFilters(q, activeFilters)
+      .order('created_at', { ascending: false })
+      .range(page * PAGE, page * PAGE + size - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    const rows = data || [];
+    ids.push(...rows.map(r => r.id).filter(Boolean));
+    if (rows.length < size) break;
+  }
+  return [...new Set(ids)];
+}
+
+function resultStatusPatchForCampaign(status) {
+  const now = new Date().toISOString();
+  if (status === 'sent') return { prospect_status: 'enviado', last_contact_at: now };
+  if (status === 'responded') return { prospect_status: 'respondeu' };
+  if (status === 'won') return { prospect_status: 'fechado' };
+  if (status === 'lost') return { prospect_status: 'descartado' };
+  return null;
+}
+
 export const api = {
   // ── Dashboard ─────────────────────────────────────────────────────────────
   getMetrics: async () => {
@@ -275,6 +312,124 @@ export const api = {
     const { error } = await supabase.from('ignored_leads').delete().eq('id', id);
     if (error) throw error;
     return { success: true };
+  },
+
+  // ── Campanhas e cadência comercial ───────────────────────────────────────
+  getCampaignTemplates: async () => {
+    const { data, error } = await supabase
+      .from('campaign_templates')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  },
+  createCampaignTemplate: async ({ name, body }) => {
+    const { data, error } = await supabase
+      .from('campaign_templates')
+      .insert({ name, body, channel: 'whatsapp' })
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { success: true, data };
+  },
+  deleteCampaignTemplate: async (id) => {
+    const { error } = await supabase.from('campaign_templates').delete().eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  },
+  getCampaigns: async () => {
+    const { data, error } = await supabase.rpc('campaign_overview');
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  },
+  createCampaign: async ({ name, templateId = null, messageBody, filters = {}, maxLeads = 1000 }) => {
+    const activeFilters = cleanFilters(filters);
+    const leadIds = await fetchLeadIds(activeFilters, maxLeads);
+    if (!leadIds.length) {
+      return { success: false, message: 'Nenhum lead encontrado para estes filtros', data: null };
+    }
+
+    const { data: campaign, error: campaignError } = await supabase
+      .from('campaigns')
+      .insert({
+        name,
+        template_id: templateId || null,
+        message_body: messageBody,
+        filters: activeFilters,
+        total_leads: leadIds.length,
+        status: 'active',
+      })
+      .select('*')
+      .single();
+    if (campaignError) throw campaignError;
+
+    const rows = leadIds.map(result_id => ({
+      campaign_id: campaign.id,
+      result_id,
+      status: 'pending',
+    }));
+    for (let i = 0; i < rows.length; i += 500) {
+      const { error } = await supabase.from('campaign_leads').insert(rows.slice(i, i + 500));
+      if (error) throw error;
+    }
+
+    return { success: true, data: { ...campaign, total_leads: leadIds.length } };
+  },
+  deleteCampaign: async (id) => {
+    const { error } = await supabase.from('campaigns').delete().eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  },
+  getCampaignLeads: async (campaignId, status = '', page = 1, limit = 30) => {
+    const { from, to } = rangeOf(page, limit);
+    let q = supabase
+      .from('campaign_leads')
+      .select('*, results(id,name,phone,email,website,address,category,rating,reviews_count,prospect_status,notes,last_contact_at)', { count: 'exact' })
+      .eq('campaign_id', campaignId);
+
+    if (status === 'due') {
+      q = q.eq('status', 'sent').not('followup_due_at', 'is', null).lte('followup_due_at', new Date().toISOString());
+    } else if (status) {
+      q = q.eq('status', status);
+    }
+
+    q = q.order(status === 'due' ? 'followup_due_at' : 'created_at', { ascending: true }).range(from, to);
+    const { data, count, error } = await q;
+    if (error) throw error;
+    const rows = (data || []).map(row => {
+      const lead = row.results || {};
+      delete row.results;
+      return { ...row, lead };
+    });
+    return { success: true, data: { data: rows, total: count || 0, page, limit } };
+  },
+  updateCampaignLeadStatus: async (campaignLeadId, status, resultId) => {
+    const now = new Date();
+    const patch = { status, updated_at: now.toISOString() };
+    if (status === 'sent') {
+      patch.sent_at = now.toISOString();
+      patch.followup_due_at = new Date(now.getTime() + 3 * 86400000).toISOString();
+    }
+    if (status === 'responded') patch.responded_at = now.toISOString();
+    if (status === 'won') patch.closed_at = now.toISOString();
+    if (status === 'lost') patch.discarded_at = now.toISOString();
+
+    const { data, error } = await supabase
+      .from('campaign_leads')
+      .update(patch)
+      .eq('id', campaignLeadId)
+      .select('*')
+      .single();
+    if (error) throw error;
+
+    const resultPatch = resultStatusPatchForCampaign(status);
+    if (resultId && resultPatch) {
+      const { error: resultError } = await supabase.from('results').update(resultPatch).eq('id', resultId);
+      if (resultError) throw resultError;
+      clearMapLeadsCache();
+    }
+
+    return { success: true, data };
   },
 
   // ── Exportação CSV (client-side) ──────────────────────────────────────────

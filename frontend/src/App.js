@@ -3,7 +3,7 @@ import SearchList from './components/SearchList';
 import LoginScreen from './components/LoginScreen';
 import { api } from './api';
 import { supabase } from './supabaseClient';
-import { BarChart3, Search, FolderOpen, MessageCircle, Upload, Download, ChevronLeft, Map as MapIcon } from './components/Icons';
+import { BarChart3, Search, FolderOpen, MessageCircle, Upload, Download, ChevronLeft, Map as MapIcon, Target } from './components/Icons';
 
 // Abas pesadas carregadas sob demanda (code splitting): cada uma vira um chunk
 // separado, baixado só quando a aba é aberta pela primeira vez — em vez de tudo
@@ -13,6 +13,7 @@ const ResultsTable = lazy(() => import('./components/ResultsTable'));
 const ScraperTab   = lazy(() => import('./components/ScraperTab'));
 const ProspectTab  = lazy(() => import('./components/ProspectTab'));
 const MapaTab      = lazy(() => import('./components/MapaTab'));
+const CampaignsTab = lazy(() => import('./components/CampaignsTab'));
 const UpdatesTab   = lazy(() => import('./components/UpdatesTab'));
 
 function TabFallback() {
@@ -25,6 +26,7 @@ const NAV = [
   { id: 'searches',  label: 'Importações', icon: FolderOpen },
   { id: 'mapa',      label: 'Mapa', icon: MapIcon },
   { id: 'prospect',  label: 'Prospecção', icon: MessageCircle },
+  { id: 'campaigns', label: 'Campanhas', icon: Target },
   { id: 'updates',   label: 'Atualizações', icon: Download },
 ];
 
@@ -233,6 +235,9 @@ export default function App() {
 
         {/* Prospect tab */}
         <TabPanel active={tab === 'prospect'}><ProspectTab /></TabPanel>
+
+        {/* Campaigns tab */}
+        <TabPanel active={tab === 'campaigns'}><CampaignsTab /></TabPanel>
 
         {/* Updates tab */}
         <TabPanel active={tab === 'updates'}><UpdatesTab /></TabPanel>

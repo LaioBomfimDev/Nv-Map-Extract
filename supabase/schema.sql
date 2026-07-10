@@ -66,6 +66,46 @@ create table if not exists public.user_prefs (
   primary key (user_id, key)
 );
 
+create table if not exists public.campaign_templates (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  name       text not null,
+  channel    text not null default 'whatsapp',
+  body       text not null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists public.campaigns (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  template_id  uuid references public.campaign_templates(id) on delete set null,
+  name         text not null,
+  message_body text not null,
+  filters      jsonb not null default '{}'::jsonb,
+  total_leads  int not null default 0,
+  status       text not null default 'active',
+  created_at   timestamptz default now(),
+  updated_at   timestamptz default now()
+);
+
+create table if not exists public.campaign_leads (
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  campaign_id     uuid not null references public.campaigns(id) on delete cascade,
+  result_id       uuid not null references public.results(id) on delete cascade,
+  status          text not null default 'pending',
+  sent_at         timestamptz,
+  followup_due_at timestamptz,
+  responded_at    timestamptz,
+  closed_at       timestamptz,
+  discarded_at    timestamptz,
+  notes           text,
+  created_at      timestamptz default now(),
+  updated_at      timestamptz default now(),
+  unique (campaign_id, result_id)
+);
+
 alter table public.searches alter column source set default 'extension';
 
 -- ── Índices ─────────────────────────────────────────────────────────────────
@@ -75,6 +115,11 @@ create index if not exists idx_results_status     on public.results (user_id, pr
 create index if not exists idx_searches_user      on public.searches (user_id, created_at desc);
 create index if not exists idx_ignored_user       on public.ignored_leads (user_id);
 create index if not exists idx_user_prefs_user    on public.user_prefs (user_id);
+create index if not exists idx_campaign_templates_user on public.campaign_templates (user_id, created_at desc);
+create index if not exists idx_campaigns_user          on public.campaigns (user_id, created_at desc);
+create index if not exists idx_campaign_leads_campaign on public.campaign_leads (campaign_id, status, created_at);
+create index if not exists idx_campaign_leads_user     on public.campaign_leads (user_id, status);
+create index if not exists idx_campaign_leads_due      on public.campaign_leads (user_id, followup_due_at);
 -- Dedupe por lugar (por usuário), ignorando place_id vazio
 create unique index if not exists uq_results_user_place
   on public.results (user_id, place_id)
@@ -85,11 +130,14 @@ alter table public.searches      enable row level security;
 alter table public.results       enable row level security;
 alter table public.ignored_leads enable row level security;
 alter table public.user_prefs    enable row level security;
+alter table public.campaign_templates enable row level security;
+alter table public.campaigns          enable row level security;
+alter table public.campaign_leads     enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['searches','results','ignored_leads','user_prefs'] loop
+  foreach t in array array['searches','results','ignored_leads','user_prefs','campaign_templates','campaigns','campaign_leads'] loop
     execute format('drop policy if exists "own_select" on public.%I', t);
     execute format('drop policy if exists "own_insert" on public.%I', t);
     execute format('drop policy if exists "own_update" on public.%I', t);
@@ -358,11 +406,63 @@ begin
   return json_build_object('kept', v_kept, 'deleted', v_deleted);
 end $$;
 
+-- ============================================================================
+-- FUNÇÃO: campaign_overview — lista campanhas com métricas compactas para o CRM.
+-- ============================================================================
+create or replace function public.campaign_overview()
+returns json language sql security invoker stable as $$
+  with stats as (
+    select
+      campaign_id,
+      count(*)::int as total,
+      count(*) filter (where status = 'pending')::int as pending,
+      count(*) filter (where status = 'sent')::int as sent,
+      count(*) filter (where status = 'responded')::int as responded,
+      count(*) filter (where status = 'won')::int as won,
+      count(*) filter (where status = 'lost')::int as lost,
+      count(*) filter (
+        where status = 'sent'
+          and followup_due_at is not null
+          and followup_due_at <= now()
+      )::int as due_followups
+    from public.campaign_leads
+    where user_id = auth.uid()
+    group by campaign_id
+  )
+  select coalesce(json_agg(json_build_object(
+    'id', c.id,
+    'name', c.name,
+    'template_id', c.template_id,
+    'message_body', c.message_body,
+    'filters', c.filters,
+    'status', c.status,
+    'created_at', c.created_at,
+    'updated_at', c.updated_at,
+    'total_leads', coalesce(s.total, c.total_leads, 0),
+    'pending', coalesce(s.pending, 0),
+    'sent', coalesce(s.sent, 0),
+    'responded', coalesce(s.responded, 0),
+    'won', coalesce(s.won, 0),
+    'lost', coalesce(s.lost, 0),
+    'due_followups', coalesce(s.due_followups, 0)
+  ) order by c.created_at desc), '[]'::json)
+  from public.campaigns c
+  left join stats s on s.campaign_id = c.id
+  where c.user_id = auth.uid();
+$$;
+
 -- ── Permissão de execução para usuários logados ─────────────────────────────
+grant select, insert, update, delete on public.searches to authenticated;
+grant select, insert, update, delete on public.results to authenticated;
+grant select, insert, update, delete on public.ignored_leads to authenticated;
 grant select, insert, update, delete on public.user_prefs to authenticated;
+grant select, insert, update, delete on public.campaign_templates to authenticated;
+grant select, insert, update, delete on public.campaigns to authenticated;
+grant select, insert, update, delete on public.campaign_leads to authenticated;
 grant execute on function public.import_leads(text, text, jsonb)  to authenticated;
 grant execute on function public.delete_results(uuid[])           to authenticated;
 grant execute on function public.delete_search_smart(uuid)        to authenticated;
 grant execute on function public.dashboard_metrics()              to authenticated;
 grant execute on function public.dashboard_charts()               to authenticated;
 grant execute on function public.prospect_summary()               to authenticated;
+grant execute on function public.campaign_overview()              to authenticated;

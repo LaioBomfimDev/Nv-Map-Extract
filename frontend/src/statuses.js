@@ -22,12 +22,13 @@ export function getStatusMeta(value) {
   return STATUS_MAP[value] || STATUS_MAP.novo;
 }
 
-export function getWhatsAppUrl(phone) {
+export function getWhatsAppUrl(phone, text = '') {
   if (!phone) return null;
   const clean = String(phone).replace(/\D/g, '');
   if (clean.length < 8) return null;
   const withDDI = clean.startsWith('55') ? clean : '55' + clean;
-  return `https://wa.me/${withDDI}`;
+  const base = `https://wa.me/${withDDI}`;
+  return text ? `${base}?text=${encodeURIComponent(text)}` : base;
 }
 
 // Score simples de qualidade do lead (0 a 100)

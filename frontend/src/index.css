@@ -130,6 +130,10 @@ input:focus, textarea:focus, select:focus {
   .responsive-grid-scraper {
     grid-template-columns: 1fr !important;
   }
+
+  .campaign-layout {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 @media (max-width: 768px) {
