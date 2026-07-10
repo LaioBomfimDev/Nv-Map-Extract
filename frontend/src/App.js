@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import SearchList from './components/SearchList';
 import LoginScreen from './components/LoginScreen';
 import { api } from './api';
-import { supabase } from './supabaseClient';
+import { isSupabaseConfigured, supabase } from './supabaseClient';
 import { BarChart3, Search, FolderOpen, MessageCircle, Upload, Download, ChevronLeft, Map as MapIcon, Target } from './components/Icons';
 
 // Abas pesadas carregadas sob demanda (code splitting): cada uma vira um chunk
@@ -109,6 +109,11 @@ export default function App() {
 
   // Sessão do Supabase: carrega a atual e escuta mudanças (login/logout).
   useEffect(() => {
+    if (!isSupabaseConfigured() || !supabase) {
+      setAuthLoading(false);
+      return undefined;
+    }
+
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setAuthLoading(false);
@@ -123,6 +128,7 @@ export default function App() {
   }
 
   async function handleLogout() {
+    if (!supabase) return;
     await supabase.auth.signOut();
     setSelectedSearch(null);
     setTab('dashboard');

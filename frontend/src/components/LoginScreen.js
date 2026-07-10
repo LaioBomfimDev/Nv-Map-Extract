@@ -11,6 +11,7 @@ export default function LoginScreen() {
 
   async function loginSenha(e) {
     e.preventDefault();
+    if (!configured || !supabase) return;
     setLoading(true);
     setError('');
     try {
@@ -29,6 +30,7 @@ export default function LoginScreen() {
   }
 
   async function loginGoogle() {
+    if (!configured || !supabase) return;
     setLoading(true);
     setError('');
     try {

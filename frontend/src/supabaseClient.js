@@ -18,12 +18,14 @@ if (!url || !anon) {
   );
 }
 
-export const supabase = createClient(url, anon, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-});
-
 export const isSupabaseConfigured = () => Boolean(url && anon);
+
+export const supabase = isSupabaseConfigured()
+  ? createClient(url, anon, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    })
+  : null;
