@@ -4,6 +4,15 @@
 // ================================================================
 
 (function () {
+    // O Maps costuma reescrever a URL antes do document_end. Preserva os dados
+    // do trabalho de mineração no DOM para o script principal recuperá-los.
+    try {
+        const initialHash = location.hash || '';
+        if (initialHash.includes('fm_auto')) {
+            document.documentElement.setAttribute('data-fm-auto-hash', initialHash);
+        }
+    } catch (_) {}
+
     const script = document.createElement('script');
     script.src = chrome.runtime.getURL('injected.js');
     script.onload = function () {

@@ -75,7 +75,7 @@ O login Google precisa de credenciais no Google Cloud. É a parte mais chata, ma
 3. Em **Environment Variables**, adicione:
    - `REACT_APP_SUPABASE_URL` = sua Project URL
    - `REACT_APP_SUPABASE_ANON_KEY` = sua anon public
-4. **Deploy**. No fim, anote a URL final, ex.: `https://mapssearch-dashboard.vercel.app`.
+4. **Deploy**. A URL oficial deste projeto e `https://nv-map-extract.vercel.app`.
 
 ### 2.3 Voltar no Supabase e liberar o domínio
 1. Supabase → **Authentication → URL Configuration**:
@@ -94,7 +94,7 @@ O login Google precisa de credenciais no Google Cloud. É a parte mais chata, ma
    APP_URL: 'https://SEU-APP.vercel.app',
    ```
 2. Abra [`extension/manifest.json`](extension/manifest.json). No **primeiro**
-   bloco de `content_scripts` (o do `authBridge.js`), troque `https://mapssearch-dashboard.vercel.app/*`
+   bloco de `content_scripts` (o do `authBridge.js`), use `https://nv-map-extract.vercel.app/*`
    pela **sua** URL da Vercel (mantenha `http://localhost:3008/*` se for testar local).
 
 ### 3.2 Instalar

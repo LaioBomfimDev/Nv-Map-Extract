@@ -1,6 +1,6 @@
 import React from 'react';
 import { gmapsSearchUrl, startMineOnMaps } from '../utils/geo';
-import { Lightbulb, Target, ExternalLink, MapPin } from './Icons';
+import { Lightbulb, Target, ExternalLink, MapPin, Check } from './Icons';
 
 const num = (v) => (Number(v || 0)).toLocaleString('pt-BR');
 const popShort = (p) => p >= 1000000 ? `${(p / 1000000).toFixed(1)} mi` : p >= 1000 ? `${Math.round(p / 1000)} mil` : String(p);
@@ -17,6 +17,7 @@ const selStyle = {
 // projeção honesta do seu próprio histórico, não um número real.
 export default function MapaSuggestions({
   loading, error, suggestions, deepen, themeOptions, controls, onControls, onFocus,
+  onAddPlan, plannedKeys = new Set(),
 }) {
   const labelOf = (tk) => themeOptions.find(t => t.key === tk)?.label || tk;
   const colorOf = (tk) => themeOptions.find(t => t.key === tk)?.color || '#a1a1aa';
@@ -107,7 +108,7 @@ export default function MapaSuggestions({
                     ))}
                     <span style={{ color: '#52525b' }}> (estimado)</span>
                   </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <a
                       href={gmapsSearchUrl(labelOf(s.ests[0].themeKey), s.muni)}
                       target="_blank"
@@ -120,6 +121,21 @@ export default function MapaSuggestions({
                     <button onClick={() => onFocus(s.muni)} style={ghostBtn}>
                       <MapPin size={11} /> Ver no mapa
                     </button>
+                    {(() => {
+                      const top = s.ests[0];
+                      const key = `${s.muni.code}:${top.themeKey}`;
+                      const planned = plannedKeys.has(key);
+                      return (
+                        <button type="button" disabled={planned} onClick={() => onAddPlan?.({
+                          kind: 'expand', muni: s.muni, themeKey: top.themeKey,
+                          themeLabel: labelOf(top.themeKey), estimate: top.est,
+                          distance: s.dist, from: s.from?.nome || '',
+                        })} style={{ ...ghostBtn, color: planned ? '#10b981' : '#f59e0b', borderColor: planned ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)', cursor: planned ? 'default' : 'pointer' }}>
+                          {planned ? <Check size={11} color="#10b981" /> : <Target size={11} color="#f59e0b" />}
+                          {planned ? 'No plano' : 'Adicionar ao plano'}
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               ))}
@@ -143,7 +159,7 @@ export default function MapaSuggestions({
                   <div style={{ fontSize: 12, color: '#a1a1aa', margin: '4px 0 8px' }}>
                     você nunca buscou esse tema aqui · <span style={{ fontWeight: 600, color: '#fafafa' }}>~{num(d.est)}</span> estimados
                   </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <a
                       href={gmapsSearchUrl(labelOf(d.themeKey), d.muni)}
                       target="_blank"
@@ -156,6 +172,19 @@ export default function MapaSuggestions({
                     <button onClick={() => onFocus(d.muni)} style={ghostBtn}>
                       <MapPin size={11} /> Ver no mapa
                     </button>
+                    {(() => {
+                      const key = `${d.muni.code}:${d.themeKey}`;
+                      const planned = plannedKeys.has(key);
+                      return (
+                        <button type="button" disabled={planned} onClick={() => onAddPlan?.({
+                          kind: 'deepen', muni: d.muni, themeKey: d.themeKey,
+                          themeLabel: labelOf(d.themeKey), estimate: d.est,
+                        })} style={{ ...ghostBtn, color: planned ? '#10b981' : '#f59e0b', borderColor: planned ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)', cursor: planned ? 'default' : 'pointer' }}>
+                          {planned ? <Check size={11} color="#10b981" /> : <Target size={11} color="#f59e0b" />}
+                          {planned ? 'No plano' : 'Adicionar ao plano'}
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               ))}

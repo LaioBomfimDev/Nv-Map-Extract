@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
+import useRefreshOnFocus from '../hooks/useRefreshOnFocus';
 import loadMarkerCluster from '../utils/loadMarkerCluster';
 import loadLeaflet from '../utils/loadLeaflet';
 import {
@@ -12,7 +13,7 @@ import {
 import { isContacted } from '../statuses';
 import MapaSuggestions from './MapaSuggestions';
 import LeadModal from './LeadModal';
-import { Map as MapIcon, Send, Building2 } from './Icons';
+import { Map as MapIcon, Send, Building2, Target, Trash2, Play, Lightbulb } from './Icons';
 
 const DARK_TILES = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
 const TILE_OPTS = {
@@ -22,6 +23,20 @@ const TILE_OPTS = {
 };
 const CONTACTED_COLOR = '#22c55e';
 const SUGGEST_COLOR = '#f59e0b';
+const TERRITORY_PLAN_KEY = 'mapa_territory_plan_v1';
+
+function loadTerritoryPlan() {
+  try {
+    const value = JSON.parse(localStorage.getItem(TERRITORY_PLAN_KEY));
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function territoryPlanId(muni, themeKey) {
+  return `${muni?.code || muni?.nome || ''}:${themeKey || ''}`;
+}
 
 const num = (v) => (Number(v || 0)).toLocaleString('pt-BR');
 const popShort = (p) => p >= 1000000 ? `${(p / 1000000).toFixed(1)} mi` : p >= 1000 ? `${Math.round(p / 1000)} mil` : String(p);
@@ -196,6 +211,7 @@ export default function MapaTab() {
   const [onlyPending, setOnlyPending] = useState(false);
   const [sugControls, setSugControls] = useState({ maxKm: 100, minEst: 0, themeKey: '' });
   const [modalLead, setModalLead] = useState(null);
+  const [territoryPlan, setTerritoryPlan] = useState(loadTerritoryPlan);
 
   const mapDiv = useRef(null);
   const mapInst = useRef(null);
@@ -210,16 +226,23 @@ export default function MapaTab() {
   const markSentRef = useRef(() => {});
   const openLeadRef = useRef(() => {});
   const leadsByIdRef = useRef(new Map());
+  const territoryPlanRef = useRef(territoryPlan);
 
-  // Busca todos os leads com coordenadas uma vez.
-  useEffect(() => {
-    let cancelled = false;
-    api.getMapLeads()
-      .then(r => { if (!cancelled) setLeads(r.data || []); })
-      .catch(() => { if (!cancelled) setError('Não foi possível carregar os leads do mapa.'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+  const loadMapLeads = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    setError('');
+    try {
+      const response = await api.getMapLeads();
+      if (response.success) setLeads(response.data || []);
+    } catch {
+      setError('Não foi possível carregar os leads do mapa.');
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, []);
+
+  // Busca todos os leads com coordenadas na primeira abertura.
+  useEffect(() => { loadMapLeads(); }, [loadMapLeads]);
 
   // Pede um status fresco da extensão para o dispatcher de mineração decidir
   // entre ponte nativa e fallback de Maps antes do primeiro clique.
@@ -235,6 +258,21 @@ export default function MapaTab() {
       .catch(() => loadLeaflet()
         .then(() => { if (!cancelled) { pluginRef.current = false; setReady(true); } })
         .catch(() => { if (!cancelled) setError('Falha ao carregar o mapa.'); }));
+    return () => { cancelled = true; };
+  }, []);
+
+  // O plano territorial usa o mesmo padrão das preferências de tema: resposta
+  // imediata local e sincronização entre dispositivos quando possível.
+  useEffect(() => {
+    let cancelled = false;
+    api.getUserPref(TERRITORY_PLAN_KEY)
+      .then(response => {
+        if (cancelled || !response?.success || !Array.isArray(response.data)) return;
+        territoryPlanRef.current = response.data;
+        setTerritoryPlan(response.data);
+        try { localStorage.setItem(TERRITORY_PLAN_KEY, JSON.stringify(response.data)); } catch { /* segue sem cache local */ }
+      })
+      .catch(() => { /* mantém o plano local */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -309,6 +347,42 @@ export default function MapaTab() {
   function persistThemePrefs(next) {
     saveThemePrefs(next);
     api.setUserPref(THEME_PREFS_KEY, next).catch(() => { /* fallback local já salvo */ });
+  }
+
+  function commitTerritoryPlan(next) {
+    territoryPlanRef.current = next;
+    setTerritoryPlan(next);
+    try { localStorage.setItem(TERRITORY_PLAN_KEY, JSON.stringify(next)); } catch { /* segue apenas em memória */ }
+    api.setUserPref(TERRITORY_PLAN_KEY, next).catch(() => { /* cache local já persistido */ });
+  }
+
+  function addTerritoryPlan(item) {
+    const id = territoryPlanId(item.muni, item.themeKey);
+    const current = territoryPlanRef.current;
+    if (current.some(entry => entry.id === id)) return;
+    commitTerritoryPlan([...current, {
+      ...item,
+      id,
+      municipality: item.muni?.nome || '',
+      uf: item.muni?.uf || '',
+      muniCode: item.muni?.code || '',
+      lat: item.muni?.lat,
+      lng: item.muni?.lng,
+      createdAt: new Date().toISOString(),
+      status: 'planned',
+    }]);
+  }
+
+  function removeTerritoryPlan(id) {
+    commitTerritoryPlan(territoryPlanRef.current.filter(item => item.id !== id));
+  }
+
+  function startTerritoryPlanItem(item) {
+    const muni = { code: item.muniCode, nome: item.municipality, uf: item.uf, lat: item.lat, lng: item.lng };
+    startMineQuery(gmapsQuery(item.themeLabel, muni));
+    commitTerritoryPlan(territoryPlanRef.current.map(entry => entry.id === item.id
+      ? { ...entry, status: 'started', startedAt: new Date().toISOString() }
+      : entry));
   }
 
   // ── Inteligência geográfica (fase 3) ─────────────────────────────────────
@@ -549,6 +623,15 @@ export default function MapaTab() {
   const fallbackCities = useMemo(() => new Set(plotted.map(l => (l.search_city || '').trim()).filter(Boolean)), [plotted]);
   const cityCount = visited ? visited.size : fallbackCities.size;
   const pctContacted = totalPlotted ? Math.round((totalContacted / totalPlotted) * 100) : 0;
+  const plannedKeys = useMemo(() => new Set(territoryPlan.map(item => item.id)), [territoryPlan]);
+  const plannedEstimate = territoryPlan.reduce((sum, item) => sum + Number(item.estimate || 0), 0);
+
+  const tabRef = useRefreshOnFocus(useCallback(async () => {
+    api.invalidateMapLeadsCache?.();
+    await loadMapLeads(true);
+    requestExtensionStatus();
+    window.requestAnimationFrame(() => mapInst.current?.invalidateSize?.());
+  }, [loadMapLeads]), { minIntervalMs: 2000 });
 
   const card = { background: '#18181b', border: '1px solid #27272a', padding: '14px 16px' };
   const metric = (label, value) => (
@@ -565,7 +648,7 @@ export default function MapaTab() {
   });
 
   return (
-    <div>
+    <div ref={tabRef}>
       <style>{`
         .mapa-point, .mapa-cluster, .mapa-sug { background: transparent !important; border: none !important; }
         .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #18181b; color: #fafafa; border-radius: 0; }
@@ -688,12 +771,61 @@ export default function MapaTab() {
             </div>
           )}
           {error && (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444', fontSize: 14, padding: 20 }}>
-              {error}
+            <div role="alert" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', justifyContent: 'center', color: '#fca5a5', background: 'rgba(9,9,11,0.86)', fontSize: 14, padding: 20 }}>
+              <span>{error}</span>
+              <button type="button" onClick={() => loadMapLeads()} style={{ background: 'transparent', border: '1px solid rgba(239,68,68,0.45)', color: '#fca5a5', padding: '6px 10px', cursor: 'pointer', fontSize: 12 }}>Tentar novamente</button>
             </div>
           )}
         </div>
       </div>
+
+      {territoryPlan.length > 0 && (
+        <section aria-labelledby="territory-plan-title" style={{ ...card, marginTop: 16, padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div>
+              <h3 id="territory-plan-title" style={{ color: '#fafafa', fontSize: 15, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 7 }}>
+                <Target size={15} color="#f59e0b" /> Plano territorial
+              </h3>
+              <p style={{ color: '#71717a', fontSize: 11, margin: '3px 0 0' }}>
+                {territoryPlan.length} {territoryPlan.length === 1 ? 'oportunidade priorizada' : 'oportunidades priorizadas'} · ~{num(plannedEstimate)} leads estimados
+              </p>
+            </div>
+            {territoryPlan.some(item => item.status !== 'started') && (
+              <button type="button" onClick={() => startTerritoryPlanItem(territoryPlan.find(item => item.status !== 'started'))}
+                style={{ background: '#d97706', border: 'none', color: '#fff', padding: '8px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Play size={12} color="#fff" /> Minerar próxima
+              </button>
+            )}
+          </div>
+          <div className="territory-plan-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 8 }}>
+            {territoryPlan.map(item => (
+              <div key={item.id} style={{ background: '#09090b', border: '1px solid #27272a', borderLeft: `3px solid ${item.status === 'started' ? '#10b981' : '#f59e0b'}`, padding: '10px 11px', minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: '#fafafa', fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.themeLabel}</div>
+                    <div style={{ color: '#a1a1aa', fontSize: 11, marginTop: 2 }}>{item.municipality} — {item.uf}</div>
+                  </div>
+                  <span className="mono" title="Estimativa baseada na densidade do seu histórico" style={{ color: '#f59e0b', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>~{num(item.estimate)}</span>
+                </div>
+                <div style={{ color: '#52525b', fontSize: 10, marginTop: 5 }}>
+                  {item.kind === 'expand' ? `${item.distance || 0} km da operação atual` : 'Novo segmento nesta cidade'} · estimativa, não garantia
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button type="button" onClick={() => startTerritoryPlanItem(item)}
+                    style={{ flex: 1, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.35)', color: '#10b981', padding: '5px 7px', fontSize: 10, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                    <Play size={10} color="#10b981" /> {item.status === 'started' ? 'Minerar novamente' : 'Minerar agora'}
+                  </button>
+                  <button type="button" onClick={() => removeTerritoryPlan(item.id)} aria-label={`Remover ${item.themeLabel} em ${item.municipality} do plano`}
+                    style={{ background: 'transparent', border: '1px solid #27272a', color: '#71717a', padding: '5px 7px', cursor: 'pointer' }}><Trash2 size={10} color="#71717a" /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ color: '#52525b', fontSize: 10, marginTop: 10, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <Lightbulb size={10} color="#f59e0b" /> As estimativas usam densidade observada × população; valide a oportunidade durante a mineração.
+          </div>
+        </section>
+      )}
 
       {/* Sugestões inteligentes (fase 3) */}
       {totalPlotted > 0 && (
@@ -706,6 +838,8 @@ export default function MapaTab() {
           controls={sugControls}
           onControls={patch => setSugControls(prev => ({ ...prev, ...patch }))}
           onFocus={focusMuni}
+          onAddPlan={addTerritoryPlan}
+          plannedKeys={plannedKeys}
         />
       )}
 

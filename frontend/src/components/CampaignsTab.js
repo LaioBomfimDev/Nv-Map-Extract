@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import useRefreshOnFocus from '../hooks/useRefreshOnFocus';
 import { getWhatsAppUrl, STATUS_OPTIONS } from '../statuses';
 import {
   Target, FileText, Users, Send, Clock, MessageCircle, Trophy, XCircle,
@@ -84,11 +85,31 @@ function statusMeta(value) {
   return CAMPAIGN_STATUS.find(s => s.value === value) || CAMPAIGN_STATUS[0];
 }
 
+function campaignMetrics(campaign = {}) {
+  const currentSent = Number(campaign.sent || 0);
+  const currentResponded = Number(campaign.responded || 0);
+  const currentWon = Number(campaign.won || 0);
+  const currentLost = Number(campaign.lost || 0);
+  // Os campos *_total usam timestamps e não diminuem quando o lead avança de
+  // etapa. O fallback mantém números coerentes em bancos ainda não migrados.
+  const contacted = Number(campaign.sent_total ?? (currentSent + currentResponded + currentWon + currentLost));
+  const responses = Number(campaign.responded_total ?? (currentResponded + currentWon));
+  const wins = Number(campaign.won_total ?? currentWon);
+  const responseRate = campaign.response_rate == null
+    ? (contacted ? Math.round((responses / contacted) * 100) : 0)
+    : Math.round(Number(campaign.response_rate));
+  const conversionRate = contacted ? Math.round((wins / contacted) * 100) : 0;
+  const total = Number(campaign.total_leads || 0);
+  const processed = Math.max(0, total - Number(campaign.pending || 0));
+  return { contacted, responses, wins, responseRate, conversionRate, total, processed };
+}
+
 function FilterButton({ active, onClick, children, icon: Icon }) {
   return (
     <button
       onClick={onClick}
       type="button"
+      aria-pressed={active}
       style={{
         background: active ? 'rgba(16,185,129,0.14)' : 'transparent',
         color: active ? '#10b981' : '#a1a1aa',
@@ -138,14 +159,17 @@ export default function CampaignsTab() {
 
   const totalPages = Math.max(1, Math.ceil(totalRows / LIMIT));
   const totals = useMemo(() => campaigns.reduce((acc, c) => {
+    const metric = campaignMetrics(c);
     acc.campaigns += 1;
     acc.pending += c.pending || 0;
-    acc.sent += c.sent || 0;
-    acc.responded += c.responded || 0;
-    acc.won += c.won || 0;
+    acc.contacted += metric.contacted;
+    acc.responses += metric.responses;
+    acc.won += metric.wins;
     acc.due += c.due_followups || 0;
     return acc;
-  }, { campaigns: 0, pending: 0, sent: 0, responded: 0, won: 0, due: 0 }), [campaigns]);
+  }, { campaigns: 0, pending: 0, contacted: 0, responses: 0, won: 0, due: 0 }), [campaigns]);
+  const overallResponseRate = totals.contacted ? Math.round((totals.responses / totals.contacted) * 100) : 0;
+  const overallConversionRate = totals.contacted ? Math.round((totals.won / totals.contacted) * 100) : 0;
 
   const loadCampaigns = useCallback(async () => {
     const res = await api.getCampaigns();
@@ -167,7 +191,7 @@ export default function CampaignsTab() {
       try {
         await Promise.all([loadTemplates(), loadCampaigns()]);
       } catch {
-        if (!cancelled) setActionMsg('Nao foi possivel carregar campanhas. Rode a migracao do Supabase.');
+        if (!cancelled) setActionMsg('Não foi possível carregar campanhas. Rode a migração do Supabase.');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -196,6 +220,11 @@ export default function CampaignsTab() {
 
   useEffect(() => { loadRows(); }, [loadRows]);
   useEffect(() => { setPage(1); }, [selectedCampaign?.id, statusFilter]);
+
+  const refreshRef = useRefreshOnFocus(useCallback(async () => {
+    await loadCampaigns();
+    await loadRows();
+  }, [loadCampaigns, loadRows]));
 
   function flash(msg) {
     setActionMsg(msg);
@@ -239,7 +268,7 @@ export default function CampaignsTab() {
         setPreviewTotal(res.data.total || 0);
       }
     } catch {
-      flash('Erro ao carregar a previa');
+      flash('Erro ao carregar a prévia');
     }
     setPreviewLoading(false);
   }
@@ -269,7 +298,7 @@ export default function CampaignsTab() {
         setSelectedId(res.data.id);
       }
     } catch {
-      flash('Erro ao criar campanha. Confira se a migracao foi aplicada no Supabase.');
+      flash('Erro ao criar campanha. Confira se a migração foi aplicada no Supabase.');
     }
     setCreating(false);
   }
@@ -296,7 +325,7 @@ export default function CampaignsTab() {
 
   async function deleteCampaign(campaign) {
     if (!campaign) return;
-    if (!window.confirm(`Apagar a campanha "${campaign.name}"? Os leads nao serao apagados.`)) return;
+    if (!window.confirm(`Apagar a campanha "${campaign.name}"? Os leads não serão apagados.`)) return;
     try {
       await api.deleteCampaign(campaign.id);
       setRows([]);
@@ -326,23 +355,25 @@ export default function CampaignsTab() {
   }
 
   const selectedCounts = selectedCampaign || {};
+  const selectedMetrics = campaignMetrics(selectedCampaign || {});
 
   if (loading) {
     return <p style={{ color: '#52525b', padding: '40px 0', textAlign: 'center', fontFamily: 'var(--font-mono)' }}>Carregando campanhas...</p>;
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div ref={refreshRef} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: '#fafafa', marginBottom: 4 }}>Campanhas</h1>
-        <p style={{ color: '#52525b', fontSize: 14 }}>Crie filas de prospeccao, envie mensagens com contexto e acompanhe conversao.</p>
+        <p style={{ color: '#71717a', fontSize: 14 }}>Crie filas de prospecção, siga a cadência e acompanhe respostas e conversão reais.</p>
       </div>
 
+      <div aria-live="polite" aria-atomic="true">
       {actionMsg && (
-        <div style={{
-          background: actionMsg.includes('Erro') || actionMsg.includes('Nao') ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)',
-          border: actionMsg.includes('Erro') || actionMsg.includes('Nao') ? '1px solid rgba(239,68,68,0.28)' : '1px solid rgba(16,185,129,0.28)',
-          color: actionMsg.includes('Erro') || actionMsg.includes('Nao') ? '#fca5a5' : '#6ee7b7',
+        <div role={actionMsg.includes('Erro') || actionMsg.includes('Não') ? 'alert' : 'status'} style={{
+          background: /Erro|Não|Nao/.test(actionMsg) ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)',
+          border: /Erro|Não|Nao/.test(actionMsg) ? '1px solid rgba(239,68,68,0.28)' : '1px solid rgba(16,185,129,0.28)',
+          color: /Erro|Não|Nao/.test(actionMsg) ? '#fca5a5' : '#6ee7b7',
           padding: '10px 14px',
           fontSize: 13,
           display: 'flex',
@@ -353,15 +384,16 @@ export default function CampaignsTab() {
           <span>{actionMsg}</span>
         </div>
       )}
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
         {[
           { label: 'Campanhas', value: totals.campaigns, icon: Target, color: '#10b981' },
           { label: 'Na fila', value: totals.pending, icon: Pin, color: '#f59e0b' },
-          { label: 'Enviados', value: totals.sent, icon: Send, color: '#8b5cf6' },
+          { label: 'Contatados', value: totals.contacted, icon: Send, color: '#8b5cf6' },
           { label: 'Follow-up', value: totals.due, icon: Clock, color: '#06b6d4' },
-          { label: 'Respostas', value: totals.responded, icon: MessageCircle, color: '#22c55e' },
-          { label: 'Fechados', value: totals.won, icon: Trophy, color: '#eab308' },
+          { label: 'Taxa de resposta', value: `${overallResponseRate}%`, icon: MessageCircle, color: '#22c55e' },
+          { label: 'Conversão', value: `${overallConversionRate}%`, icon: Trophy, color: '#eab308' },
         ].map(item => (
           <div key={item.label} style={{ ...card, padding: '14px 16px', borderLeft: `3px solid ${item.color}` }}>
             <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: item.color }}>{item.value || 0}</div>
@@ -439,7 +471,7 @@ export default function CampaignsTab() {
                 <button onClick={loadPreview} disabled={previewLoading}
                   style={{ flex: 1, background: '#0e0e11', color: '#e4e4e7', border: '1px solid #27272a', padding: '10px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                   <Search size={13} />
-                  <span>{previewLoading ? 'Carregando...' : 'Ver previa'}</span>
+                  <span>{previewLoading ? 'Carregando...' : 'Ver prévia'}</span>
                 </button>
                 <button onClick={createCampaign} disabled={creating}
                   style={{ flex: 1, background: 'linear-gradient(135deg,#10b981,#059669)', color: '#fff', border: 'none', padding: '10px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -491,7 +523,7 @@ export default function CampaignsTab() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
                 {campaigns.map(c => {
                   const active = selectedCampaign?.id === c.id;
-                  const rate = c.sent ? Math.round(((c.responded || 0) / c.sent) * 100) : 0;
+                  const metric = campaignMetrics(c);
                   return (
                     <button key={c.id} onClick={() => setSelectedId(c.id)}
                       style={{
@@ -504,7 +536,7 @@ export default function CampaignsTab() {
                       }}>
                       <div style={{ color: '#fafafa', fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
                       <div style={{ color: '#52525b', fontSize: 11, marginTop: 4 }}>
-                        <span className="mono">{c.total_leads || 0}</span> leads · <span className="mono">{rate}%</span> resposta
+                        <span className="mono">{c.total_leads || 0}</span> leads · <span className="mono">{metric.responseRate}%</span> resposta
                       </div>
                       <div style={{ display: 'flex', gap: 6, marginTop: 9, flexWrap: 'wrap' }}>
                         <span style={{ color: '#f59e0b', fontSize: 11 }}>{c.pending || 0} fila</span>
@@ -528,6 +560,16 @@ export default function CampaignsTab() {
                     Criada em {formatDate(selectedCampaign.created_at)} · <span className="mono">{selectedCampaign.total_leads || 0}</span> leads
                   </p>
                 </div>
+                {(Number(selectedCounts.due_followups || 0) > 0 || Number(selectedCounts.pending || 0) > 0) && (
+                  <button type="button"
+                    onClick={() => setStatusFilter(Number(selectedCounts.due_followups || 0) > 0 ? 'due' : 'pending')}
+                    style={{ background: Number(selectedCounts.due_followups || 0) > 0 ? '#0891b2' : '#d97706', color: '#fff', border: 'none', padding: '8px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {Number(selectedCounts.due_followups || 0) > 0 ? <Clock size={13} /> : <Pin size={13} />}
+                    <span>{Number(selectedCounts.due_followups || 0) > 0
+                      ? `Fazer ${selectedCounts.due_followups} follow-up${selectedCounts.due_followups === 1 ? '' : 's'}`
+                      : `Abordar ${selectedCounts.pending} da fila`}</span>
+                  </button>
+                )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   <FilterButton active={!statusFilter} onClick={() => setStatusFilter('')} icon={Users}>Todos</FilterButton>
                   {CAMPAIGN_STATUS.map(s => {
@@ -555,11 +597,25 @@ export default function CampaignsTab() {
                 </div>
               </div>
 
+              <div className="campaign-performance" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(110px, 1fr))', gap: 1, background: '#27272a', borderBottom: '1px solid #27272a' }}>
+                {[
+                  { label: 'Contatados', value: selectedMetrics.contacted.toLocaleString('pt-BR') },
+                  { label: 'Taxa de resposta', value: `${selectedMetrics.responseRate}%` },
+                  { label: 'Conversão', value: `${selectedMetrics.conversionRate}%` },
+                  { label: 'Progresso', value: `${selectedMetrics.total ? Math.round((selectedMetrics.processed / selectedMetrics.total) * 100) : 0}%` },
+                ].map(item => (
+                  <div key={item.label} style={{ background: '#111113', padding: '11px 14px' }}>
+                    <div className="mono" style={{ color: '#fafafa', fontWeight: 700, fontSize: 17 }}>{item.value}</div>
+                    <div style={{ color: '#71717a', fontSize: 10, textTransform: 'uppercase', marginTop: 2 }}>{item.label}</div>
+                  </div>
+                ))}
+              </div>
+
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                   <thead>
                     <tr>
-                      {['Lead', 'Status', 'Cadencia', 'Contato', 'Acoes'].map(h => (
+                      {['Lead', 'Status', 'Cadência', 'Contato', 'Ações'].map(h => (
                         <th key={h} style={{ padding: '12px 14px', textAlign: 'left', borderBottom: '1px solid #27272a', color: '#52525b', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
                     </tr>
@@ -592,7 +648,7 @@ export default function CampaignsTab() {
                             {row.sent_at ? (
                               <span>Enviado {formatDate(row.sent_at)} · prox. {formatDate(row.followup_due_at)}</span>
                             ) : (
-                              <span>Ainda nao enviado</span>
+                              <span>Ainda não enviado</span>
                             )}
                           </td>
                           <td style={{ padding: '13px 14px', color: '#a1a1aa', whiteSpace: 'nowrap' }}>
@@ -608,7 +664,7 @@ export default function CampaignsTab() {
                               <button onClick={() => updateRowStatus(row, 'sent')}
                                 style={{ background: 'transparent', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.3)', padding: '6px 9px', cursor: 'pointer', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                                 <Send size={12} color="#a78bfa" />
-                                <span>Enviado</span>
+                                <span>{due ? 'Follow-up enviado' : 'Marcar enviado'}</span>
                               </button>
                               <button onClick={() => updateRowStatus(row, 'responded')}
                                 style={{ background: 'transparent', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', padding: '6px 9px', cursor: 'pointer', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -643,10 +699,10 @@ export default function CampaignsTab() {
                     style={{ background: '#18181b', border: '1px solid #27272a', color: '#a1a1aa', padding: '7px 14px', cursor: page === 1 ? 'not-allowed' : 'pointer' }}>
                     Anterior
                   </button>
-                  <span style={{ color: '#52525b', fontSize: 12 }}>Pagina {page} de {totalPages}</span>
+                  <span style={{ color: '#52525b', fontSize: 12 }}>Página {page} de {totalPages}</span>
                   <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
                     style={{ background: '#18181b', border: '1px solid #27272a', color: '#a1a1aa', padding: '7px 14px', cursor: page === totalPages ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                    <span>Proxima</span>
+                    <span>Próxima</span>
                     <ArrowRight size={12} />
                   </button>
                 </div>
@@ -657,7 +713,7 @@ export default function CampaignsTab() {
           {!selectedCampaign && campaigns.length === 0 && (
             <div style={{ ...card, padding: 24, textAlign: 'center', color: '#52525b' }}>
               <FileText size={36} color="#52525b" />
-              <p style={{ marginTop: 10, fontSize: 13 }}>Crie a primeira campanha para iniciar a cadencia comercial.</p>
+              <p style={{ marginTop: 10, fontSize: 13 }}>Crie a primeira campanha para iniciar a cadência comercial.</p>
             </div>
           )}
         </div>

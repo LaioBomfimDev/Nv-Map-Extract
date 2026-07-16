@@ -87,6 +87,50 @@ input:focus, textarea:focus, select:focus {
   outline: none;
 }
 
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed !important;
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.secondary-action {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 7px 11px;
+  font: 600 12px var(--font-sans);
+  cursor: pointer;
+}
+
+.secondary-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* --- Utility Classes --- */
 
 .mono, .data-value {
@@ -124,6 +168,15 @@ input:focus, textarea:focus, select:focus {
   50% { box-shadow: 0 0 16px rgba(16, 185, 129, 0.2); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* --- Media Queries --- */
 
 @media (max-width: 1024px) {
@@ -146,13 +199,17 @@ input:focus, textarea:focus, select:focus {
   
   .responsive-header nav {
     width: 100% !important;
-    justify-content: center !important;
-    flex-wrap: wrap !important;
+    justify-content: flex-start !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    padding: 2px 2px 6px !important;
+    scroll-snap-type: x proximity;
   }
 
   .responsive-header .nav-btn {
-    flex: 1 1 auto !important;
+    flex: 0 0 auto !important;
     text-align: center !important;
+    scroll-snap-align: start;
   }
 
   .responsive-header .upload-btn-container {
@@ -177,5 +234,21 @@ input:focus, textarea:focus, select:focus {
   
   .responsive-padding {
     padding: 16px !important;
+  }
+
+  .relationship-grid,
+  .campaign-performance {
+    grid-template-columns: 1fr !important;
+  }
+
+  .action-grid,
+  .territory-plan-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  table th,
+  table td {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
   }
 }

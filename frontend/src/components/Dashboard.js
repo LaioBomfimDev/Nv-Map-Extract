@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import LeadModal from './LeadModal';
 import { STATUS_OPTIONS, getWhatsAppUrl } from '../statuses';
-import { Search, MapPin, Star, Tag, MessageCircle, Clock, Lightbulb, Building2, TrendingUp, FileText, Plug, FolderOpen, Rocket, Upload, ArrowRight, DynIcon, AlertTriangle } from './Icons';
+import { Search, MapPin, Star, Tag, MessageCircle, Clock, Lightbulb, Building2, TrendingUp, FileText, Plug, FolderOpen, Rocket, Upload, ArrowRight, DynIcon, AlertTriangle, Pin, Send, Target } from './Icons';
 
 const isExtensionSource = (source) => ['extension', 'extensao'].includes(String(source || '').toLowerCase());
 
@@ -10,6 +10,7 @@ export default function Dashboard({ onSelectSearch, onGoTo, onImportCSV }) {
     const [metrics, setMetrics] = useState(null);
     const [charts, setCharts] = useState(null);
     const [summary, setSummary] = useState(null);
+    const [campaigns, setCampaigns] = useState([]);
     const [modalLead, setModalLead] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -20,21 +21,30 @@ export default function Dashboard({ onSelectSearch, onGoTo, onImportCSV }) {
         try {
             if (!silent) setLoading(true);
             setError('');
-            const resMetrics = await api.getMetrics();
-            const resCharts = await api.getCharts();
+            const [resMetrics, resCharts, resSummary, resCampaigns] = await Promise.all([
+                api.getMetrics(),
+                api.getCharts(),
+                api.getProspectSummary().catch(() => null),
+                api.getCampaigns?.().catch(() => null),
+            ]);
 
             if (resMetrics.success) setMetrics(resMetrics.data);
             if (resCharts.success) setCharts(resCharts.data);
-
-            try {
-                const resSummary = await api.getProspectSummary();
-                if (resSummary.success) setSummary(resSummary.data);
-            } catch (e) { /* resumo é opcional */ }
+            if (resSummary?.success) setSummary(resSummary.data);
+            if (resCampaigns?.success) setCampaigns(resCampaigns.data || []);
         } catch (e) {
             setError('Não foi possível carregar os dados do Supabase. Verifique login, variáveis de ambiente e conexão.');
         } finally {
             if (!silent) setLoading(false);
         }
+    }, []);
+
+    const openLead = useCallback((lead) => {
+        if (!lead?.id) return;
+        setModalLead(lead);
+        api.getLead?.(lead.id)
+            .then(response => { if (response?.success && response.data) setModalLead(current => current?.id === lead.id ? { ...current, ...response.data } : current); })
+            .catch(() => { /* mantém os dados resumidos */ });
     }, []);
 
     useEffect(() => {
@@ -60,7 +70,37 @@ export default function Dashboard({ onSelectSearch, onGoTo, onImportCSV }) {
     const resultsByDate = charts?.resultsByDate || [];
     const statusCounts = summary?.statusCounts || {};
     const followUps = summary?.followUps || { count: 0, sample: [] };
+    const dueTasks = summary?.dueTasks || { count: 0, sample: [] };
     const suggestions = (summary?.suggestions || []).filter(s => s.count > 0);
+    const campaignDue = campaigns.reduce((sum, campaign) => sum + Number(campaign.due_followups || 0), 0);
+    const campaignQueue = campaigns.reduce((sum, campaign) => sum + Number(campaign.pending || 0), 0);
+    const nextActions = [
+        dueTasks.count > 0 && {
+            key: 'due-tasks', label: 'Tarefas vencidas', value: dueTasks.count,
+            detail: dueTasks.sample?.[0]?.title || 'Próximas ações que passaram do prazo', color: '#ef4444', icon: Target,
+            tab: 'prospect', lead: dueTasks.sample?.[0]?.lead,
+        },
+        followUps.count > 0 && {
+            key: 'followups', label: 'Follow-ups atrasados', value: followUps.count,
+            detail: 'Leads sem resposta há 3 dias ou mais', color: '#8b5cf6', icon: Clock, tab: 'prospect',
+        },
+        campaignDue > 0 && {
+            key: 'campaign-due', label: 'Cadências vencidas', value: campaignDue,
+            detail: 'Follow-ups de campanha prontos para enviar', color: '#06b6d4', icon: Send, tab: 'campaigns',
+        },
+        campaignQueue > 0 && {
+            key: 'campaign-queue', label: 'Fila de campanhas', value: campaignQueue,
+            detail: 'Contatos aguardando a primeira abordagem', color: '#f59e0b', icon: Target, tab: 'campaigns',
+        },
+        Number(statusCounts.fila || 0) > 0 && {
+            key: 'prospect-queue', label: 'Fila de prospecção', value: Number(statusCounts.fila || 0),
+            detail: 'Leads salvos para trabalhar agora', color: '#f59e0b', icon: Pin, tab: 'prospect',
+        },
+        Number(statusCounts.novo || 0) > 0 && {
+            key: 'new-leads', label: 'Novos para qualificar', value: Number(statusCounts.novo || 0),
+            detail: 'Leads ainda sem uma próxima etapa', color: '#10b981', icon: Lightbulb, tab: 'prospect',
+        },
+    ].filter(Boolean).slice(0, 4);
 
     // Calcular o máximo para o gráfico de linhas/barras de evolução de leads
     const maxLeadsByDate = resultsByDate.reduce((max, curr) => curr.count > max ? curr.count : max, 0) || 1;
@@ -79,6 +119,45 @@ export default function Dashboard({ onSelectSearch, onGoTo, onImportCSV }) {
                     <span>{error}</span>
                 </div>
             )}
+
+            {/* Começa pelo trabalho pendente, não apenas por indicadores históricos. */}
+            <section aria-labelledby="next-actions-title" style={{ background: '#18181b', border: '1px solid #27272a', padding: 22 }}>
+                <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+                    <div>
+                        <h2 id="next-actions-title" style={{ fontSize: 18, fontWeight: 700, color: '#fafafa', margin: 0 }}>Próximas ações</h2>
+                        <p style={{ color: '#71717a', fontSize: 13, margin: '3px 0 0' }}>Prioridades comerciais que merecem atenção agora.</p>
+                    </div>
+                    <button type="button" onClick={() => load(true)} className="secondary-action">
+                        Atualizar dados
+                    </button>
+                </div>
+                {nextActions.length ? (
+                    <div className="action-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+                        {nextActions.map(action => {
+                            const Icon = action.icon;
+                            return (
+                                <button key={action.key} type="button" onClick={() => action.lead ? openLead(action.lead) : onGoTo?.(action.tab)}
+                                    aria-label={`${action.label}: ${action.value}. ${action.detail}`}
+                                    style={{ background: '#09090b', border: '1px solid #27272a', borderLeft: `3px solid ${action.color}`, padding: '14px 15px', textAlign: 'left', cursor: 'pointer', color: '#fafafa' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'start' }}>
+                                        <span className="mono" style={{ fontSize: 24, fontWeight: 700, color: action.color }}>{action.value.toLocaleString('pt-BR')}</span>
+                                        <Icon size={17} color={action.color} />
+                                    </div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4 }}>{action.label}</div>
+                                    <div style={{ color: '#71717a', fontSize: 11, lineHeight: 1.4, marginTop: 3 }}>{action.detail}</div>
+                                    <span style={{ color: action.color, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 9 }}>
+                                        Resolver agora <ArrowRight size={11} color={action.color} />
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    <div role="status" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', color: '#6ee7b7', padding: '14px 16px', fontSize: 13 }}>
+                        Tudo em dia. Você pode buscar novos leads ou revisar as oportunidades do mapa.
+                    </div>
+                )}
+            </section>
 
             {/* Hero Section */}
             <div className="neon-glow" style={{
@@ -215,7 +294,7 @@ export default function Dashboard({ onSelectSearch, onGoTo, onImportCSV }) {
                             </div>
                             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                                 {sug.sample.map(lead => (
-                                    <button key={lead.id} onClick={() => setModalLead(lead)}
+                                    <button key={lead.id} onClick={() => openLead(lead)}
                                         title="Abrir ficha da empresa"
                                         style={{
                                             background: '#09090b', border: '1px solid #27272a', borderRadius: 0,

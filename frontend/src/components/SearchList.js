@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
+import useRefreshOnFocus from '../hooks/useRefreshOnFocus';
 import { Edit, Trash2 } from './Icons';
 
 export default function SearchList({ onSelectSearch, selectedId, onDeleted }) {
@@ -7,15 +8,22 @@ export default function SearchList({ onSelectSearch, selectedId, onDeleted }) {
     const [loading, setLoading] = useState(true);
     const [editingId, setEditingId] = useState(null);
     const [editName, setEditName] = useState('');
+    const [error, setError] = useState('');
 
-    const load = useCallback(() => {
-        api.getSearches()
-            .then(r => { if (r.success) setSearches(r.data); })
-            .catch(() => {})
-            .finally(() => setLoading(false));
+    const load = useCallback(async () => {
+        setError('');
+        try {
+            const response = await api.getSearches();
+            if (response.success) setSearches(response.data);
+        } catch {
+            setError('Não foi possível atualizar as importações.');
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
     useEffect(() => { load(); }, [load]);
+    const refreshRef = useRefreshOnFocus(load);
 
     async function handleDelete(e, s) {
         e.stopPropagation();
@@ -28,7 +36,7 @@ export default function SearchList({ onSelectSearch, selectedId, onDeleted }) {
             await api.deleteSearch(s.id);
             setSearches(prev => prev.filter(x => x.id !== s.id));
             onDeleted?.(s.id);
-        } catch { /* falha ao apagar */ }
+        } catch { setError('Não foi possível apagar esta importação.'); }
     }
 
     function startRename(e, s) {
@@ -44,11 +52,8 @@ export default function SearchList({ onSelectSearch, selectedId, onDeleted }) {
         try {
             await api.renameSearch(s.id, name);
             setSearches(prev => prev.map(x => x.id === s.id ? { ...x, filename: name } : x));
-        } catch { /* mantém o nome antigo */ }
+        } catch { setError('Não foi possível renomear esta importação.'); }
     }
-
-    if (loading) return <p style={{ color: '#52525b', textAlign: 'center', padding: 20, fontFamily: 'var(--font-mono)' }}>Carregando...</p>;
-    if (!searches.length) return <p style={{ color: '#52525b', fontSize: 14, padding: '20px 0' }}>Nenhuma importação ainda.</p>;
 
     const actionBtn = {
         background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 12,
@@ -57,11 +62,24 @@ export default function SearchList({ onSelectSearch, selectedId, onDeleted }) {
     };
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div ref={refreshRef} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {loading && <p style={{ color: '#52525b', textAlign: 'center', padding: 20, fontFamily: 'var(--font-mono)' }}>Carregando...</p>}
+            {error && <div role="alert" style={{ color: '#fca5a5', fontSize: 12, border: '1px solid rgba(239,68,68,0.3)', padding: 10 }}>{error}</div>}
+            {!loading && !searches.length && <p style={{ color: '#52525b', fontSize: 14, padding: '20px 0' }}>Nenhuma importação ainda.</p>}
             {searches.map(s => (
                 <div
                     key={s.id}
                     onClick={() => editingId !== s.id && onSelectSearch(s)}
+                    onKeyDown={event => {
+                        if (event.target !== event.currentTarget) return;
+                        if (editingId !== s.id && (event.key === 'Enter' || event.key === ' ')) {
+                            event.preventDefault();
+                            onSelectSearch(s);
+                        }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    aria-current={selectedId === s.id ? 'true' : undefined}
                     style={{
                         background: selectedId === s.id ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.02)',
                         border: selectedId === s.id ? '1px solid #10b981' : '1px solid #27272a',

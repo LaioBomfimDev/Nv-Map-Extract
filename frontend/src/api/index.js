@@ -85,6 +85,16 @@ function cleanFilters(filters = {}) {
   return out;
 }
 
+function makeIdempotencyKey(prefix) {
+  const random = window.crypto?.randomUUID?.()
+    || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}:${random}`;
+}
+
+function isMissingRpc(error) {
+  return ['PGRST202', '42883'].includes(error?.code);
+}
+
 async function fetchLeadIds(filters = {}, maxLeads = 1000) {
   const PAGE = 1000;
   const activeFilters = cleanFilters(filters);
@@ -103,15 +113,6 @@ async function fetchLeadIds(filters = {}, maxLeads = 1000) {
     if (rows.length < size) break;
   }
   return [...new Set(ids)];
-}
-
-function resultStatusPatchForCampaign(status) {
-  const now = new Date().toISOString();
-  if (status === 'sent') return { prospect_status: 'enviado', last_contact_at: now };
-  if (status === 'responded') return { prospect_status: 'respondeu' };
-  if (status === 'won') return { prospect_status: 'fechado' };
-  if (status === 'lost') return { prospect_status: 'descartado' };
-  return null;
 }
 
 export const api = {
@@ -154,6 +155,28 @@ export const api = {
   // o total não muda, então mandamos withCount=false e reaproveitamos o anterior.
   getResults: async (id, page = 1, limit = 50, filters = {}, withCount = true) => {
     const { from, to } = rangeOf(page, limit);
+    const { data: provenancePage, error: provenanceError } = await supabase.rpc('search_results_page', {
+      p_search_id: id,
+      p_offset: from,
+      p_limit: limit,
+      p_filters: cleanFilters(filters),
+      p_with_count: withCount,
+    });
+    if (!provenanceError) {
+      return {
+        success: true,
+        data: {
+          data: provenancePage?.data || [],
+          total: withCount ? (provenancePage?.total || 0) : null,
+          page,
+          limit,
+        },
+      };
+    }
+    // Compatibilidade durante rollout: instalacoes ainda sem a nova migracao
+    // continuam usando o vinculo legado results.search_id.
+    if (!isMissingRpc(provenanceError)) throw provenanceError;
+
     const countOpt = withCount ? { count: 'exact' } : undefined;
     let q = supabase.from('results').select('*', countOpt).eq('search_id', id);
     q = applyFilters(q, filters).order('created_at', { ascending: false }).range(from, to);
@@ -260,34 +283,46 @@ export const api = {
   },
 
   // ── Mutações de lead ──────────────────────────────────────────────────────
-  updateResultStatus: async (id, status) => {
-    const patch = { prospect_status: status };
-    if (status === 'enviado') patch.last_contact_at = new Date().toISOString();
-    const { error } = await supabase.from('results').update(patch).eq('id', id);
+  updateResultStatus: async (id, status, options = {}) => {
+    const { data, error } = await supabase.rpc('set_lead_status', {
+      p_result_ids: [id],
+      p_status: status,
+      p_occurred_at: options.occurredAt || new Date().toISOString(),
+      p_idempotency_key: options.idempotencyKey || makeIdempotencyKey('lead-status'),
+    });
     if (error) throw error;
     clearMapLeadsCache();
-    return { success: true };
+    return { success: true, changed: data || 0 };
   },
-  updateLead: async (id, data) => {
-    const patch = {};
-    if (data.status !== undefined) {
-      patch.prospect_status = data.status;
-      if (data.status === 'enviado') patch.last_contact_at = new Date().toISOString();
+  updateLead: async (id, data, options = {}) => {
+    if (data.notes !== undefined) {
+      const { error } = await supabase.from('results').update({ notes: data.notes }).eq('id', id);
+      if (error) throw error;
     }
-    if (data.notes !== undefined) patch.notes = data.notes;
-    if (!Object.keys(patch).length) return { success: true };
-    const { error } = await supabase.from('results').update(patch).eq('id', id);
-    if (error) throw error;
+    let changed = 0;
+    if (data.status !== undefined) {
+      const { data: statusChanged, error } = await supabase.rpc('set_lead_status', {
+        p_result_ids: [id],
+        p_status: data.status,
+        p_occurred_at: options.occurredAt || new Date().toISOString(),
+        p_idempotency_key: options.idempotencyKey || makeIdempotencyKey('lead-status'),
+      });
+      if (error) throw error;
+      changed = statusChanged || 0;
+    }
     clearMapLeadsCache();
-    return { success: true };
+    return { success: true, changed };
   },
-  bulkStatus: async (ids, status) => {
-    const patch = { prospect_status: status };
-    if (status === 'enviado') patch.last_contact_at = new Date().toISOString();
-    const { error } = await supabase.from('results').update(patch).in('id', ids);
+  bulkStatus: async (ids, status, options = {}) => {
+    const { data, error } = await supabase.rpc('set_lead_status', {
+      p_result_ids: ids,
+      p_status: status,
+      p_occurred_at: options.occurredAt || new Date().toISOString(),
+      p_idempotency_key: options.idempotencyKey || makeIdempotencyKey('bulk-status'),
+    });
     if (error) throw error;
     clearMapLeadsCache();
-    return { success: true, changed: ids.length };
+    return { success: true, changed: data || 0 };
   },
   bulkDelete: async (ids) => {
     const { data, error } = await supabase.rpc('delete_results', { p_ids: ids });
@@ -342,38 +377,32 @@ export const api = {
     if (error) throw error;
     return { success: true, data: data || [] };
   },
-  createCampaign: async ({ name, templateId = null, messageBody, filters = {}, maxLeads = 1000 }) => {
+  createCampaign: async ({
+    name,
+    templateId = null,
+    messageBody,
+    filters = {},
+    maxLeads = 1000,
+    idempotencyKey = null,
+    metadata = {},
+  }) => {
     const activeFilters = cleanFilters(filters);
     const leadIds = await fetchLeadIds(activeFilters, maxLeads);
     if (!leadIds.length) {
       return { success: false, message: 'Nenhum lead encontrado para estes filtros', data: null };
     }
 
-    const { data: campaign, error: campaignError } = await supabase
-      .from('campaigns')
-      .insert({
-        name,
-        template_id: templateId || null,
-        message_body: messageBody,
-        filters: activeFilters,
-        total_leads: leadIds.length,
-        status: 'active',
-      })
-      .select('*')
-      .single();
-    if (campaignError) throw campaignError;
-
-    const rows = leadIds.map(result_id => ({
-      campaign_id: campaign.id,
-      result_id,
-      status: 'pending',
-    }));
-    for (let i = 0; i < rows.length; i += 500) {
-      const { error } = await supabase.from('campaign_leads').insert(rows.slice(i, i + 500));
-      if (error) throw error;
-    }
-
-    return { success: true, data: { ...campaign, total_leads: leadIds.length } };
+    const { data: campaign, error } = await supabase.rpc('create_campaign', {
+      p_name: name,
+      p_template_id: templateId || null,
+      p_message_body: messageBody,
+      p_filters: activeFilters,
+      p_result_ids: leadIds,
+      p_idempotency_key: idempotencyKey || makeIdempotencyKey('campaign'),
+      p_metadata: metadata || {},
+    });
+    if (error) throw error;
+    return { success: true, data: campaign };
   },
   deleteCampaign: async (id) => {
     const { error } = await supabase.from('campaigns').delete().eq('id', id);
@@ -403,32 +432,150 @@ export const api = {
     });
     return { success: true, data: { data: rows, total: count || 0, page, limit } };
   },
-  updateCampaignLeadStatus: async (campaignLeadId, status, resultId) => {
-    const now = new Date();
-    const patch = { status, updated_at: now.toISOString() };
-    if (status === 'sent') {
-      patch.sent_at = now.toISOString();
-      patch.followup_due_at = new Date(now.getTime() + 3 * 86400000).toISOString();
-    }
-    if (status === 'responded') patch.responded_at = now.toISOString();
-    if (status === 'won') patch.closed_at = now.toISOString();
-    if (status === 'lost') patch.discarded_at = now.toISOString();
-
-    const { data, error } = await supabase
-      .from('campaign_leads')
-      .update(patch)
-      .eq('id', campaignLeadId)
-      .select('*')
-      .single();
+  updateCampaignLeadStatus: async (campaignLeadId, status, _resultId, options = {}) => {
+    const { data, error } = await supabase.rpc('update_campaign_lead_status', {
+      p_campaign_lead_id: campaignLeadId,
+      p_status: status,
+      p_event_at: options.eventAt || new Date().toISOString(),
+      p_idempotency_key: options.idempotencyKey || makeIdempotencyKey('campaign-status'),
+    });
     if (error) throw error;
+    clearMapLeadsCache();
+    return { success: true, data };
+  },
 
-    const resultPatch = resultStatusPatchForCampaign(status);
-    if (resultId && resultPatch) {
-      const { error: resultError } = await supabase.from('results').update(resultPatch).eq('id', resultId);
-      if (resultError) throw resultError;
-      clearMapLeadsCache();
+  // ── Timeline e tarefas do CRM ────────────────────────────────────────────
+  getLeadActivities: async (resultId, limit = 50) => {
+    const { data, error } = await supabase
+      .from('lead_activities')
+      .select('*')
+      .eq('result_id', resultId)
+      .order('occurred_at', { ascending: false })
+      .limit(Math.min(Math.max(Number(limit) || 50, 1), 200));
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  },
+  createLeadActivity: async (resultId, activity = {}) => {
+    const { data, error } = await supabase.rpc('create_lead_activity', {
+      p_result_id: resultId,
+      p_type: activity.type || 'note',
+      p_summary: activity.summary || '',
+      p_channel: activity.channel || null,
+      p_metadata: activity.metadata || {},
+      p_occurred_at: activity.occurredAt || new Date().toISOString(),
+      p_idempotency_key: activity.idempotencyKey || makeIdempotencyKey('activity'),
+    });
+    if (error) throw error;
+    return { success: true, data };
+  },
+  getLeadTasks: async (resultId, status = '') => {
+    let q = supabase
+      .from('lead_tasks')
+      .select('*')
+      .eq('result_id', resultId)
+      .order('due_at', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: false });
+    if (status) q = q.eq('status', status);
+    const { data, error } = await q;
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  },
+  getDueLeadTasks: async (limit = 5) => {
+    const { data, count, error } = await supabase
+      .from('lead_tasks')
+      .select('*, results(id,name,phone,category,prospect_status)', { count: 'exact' })
+      .eq('status', 'pending')
+      .not('due_at', 'is', null)
+      .lte('due_at', new Date().toISOString())
+      .order('due_at', { ascending: true })
+      .limit(Math.min(Math.max(Number(limit) || 5, 1), 100));
+    if (error) throw error;
+    const rows = (data || []).map(row => {
+      const lead = row.results || null;
+      delete row.results;
+      return { ...row, lead };
+    });
+    return { success: true, data: rows, total: count || 0 };
+  },
+  createLeadTask: async (resultId, task = {}) => {
+    const row = {
+      result_id: resultId,
+      title: String(task.title || '').trim(),
+      description: task.description || '',
+      priority: task.priority || 'normal',
+      due_at: task.dueAt || null,
+    };
+    if (!row.title) throw new Error('Titulo da tarefa e obrigatorio');
+    const { data, error } = await supabase
+      .from('lead_tasks').insert(row).select('*').single();
+    if (error) throw error;
+    return { success: true, data };
+  },
+  updateLeadTask: async (taskId, changes = {}) => {
+    const patch = { updated_at: new Date().toISOString() };
+    if (changes.title !== undefined) patch.title = String(changes.title).trim();
+    if (changes.description !== undefined) patch.description = changes.description || '';
+    if (changes.priority !== undefined) patch.priority = changes.priority;
+    if (changes.dueAt !== undefined) patch.due_at = changes.dueAt || null;
+    if (changes.status !== undefined) {
+      patch.status = changes.status;
+      patch.completed_at = changes.status === 'completed' ? new Date().toISOString() : null;
     }
+    const { data, error } = await supabase
+      .from('lead_tasks').update(patch).eq('id', taskId).select('*').single();
+    if (error) throw error;
+    return { success: true, data };
+  },
+  deleteLeadTask: async (taskId) => {
+    const { error } = await supabase.from('lead_tasks').delete().eq('id', taskId);
+    if (error) throw error;
+    return { success: true };
+  },
 
+  // ── Execucoes de mineracao ───────────────────────────────────────────────
+  getMiningJobs: async (status = '', limit = 30) => {
+    let q = supabase
+      .from('mining_jobs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(Math.min(Math.max(Number(limit) || 30, 1), 200));
+    if (status) q = q.eq('status', status);
+    const { data, error } = await q;
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  },
+  getMiningJob: async (id) => {
+    const { data, error } = await supabase
+      .from('mining_jobs').select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    return { success: !!data, data: data || null };
+  },
+  startMiningJob: async ({ clientJobId, keyword = '', city = '', source = 'extension', metadata = {} }) => {
+    const { data, error } = await supabase.rpc('start_mining_job', {
+      p_client_job_id: clientJobId || makeIdempotencyKey('mining'),
+      p_keyword: keyword,
+      p_city: city,
+      p_source: source,
+      p_metadata: metadata || {},
+    });
+    if (error) throw error;
+    return { success: true, data };
+  },
+  updateMiningJob: async (jobId, changes = {}) => {
+    const { data, error } = await supabase.rpc('update_mining_job', {
+      p_job_id: jobId,
+      p_status: changes.status ?? null,
+      p_captured_count: changes.capturedCount ?? null,
+      p_enriched_count: changes.enrichedCount ?? null,
+      p_inserted_count: changes.insertedCount ?? null,
+      p_merged_count: changes.mergedCount ?? null,
+      p_ignored_count: changes.ignoredCount ?? null,
+      p_error_code: changes.errorCode ?? null,
+      p_error_message: changes.errorMessage ?? null,
+      p_search_id: changes.searchId ?? null,
+      p_metadata: changes.metadata || {},
+    });
+    if (error) throw error;
     return { success: true, data };
   },
 
@@ -438,14 +585,28 @@ export const api = {
     const PAGE = 1000;
     let rows = [];
     for (let page = 0; ; page++) {
-      let q = supabase.from('results').select('*').eq('search_id', searchId);
-      q = applyFilters(q, filters)
-        .order('created_at', { ascending: false })
-        .range(page * PAGE, page * PAGE + PAGE - 1);
-      const { data, error } = await q;
-      if (error) throw error;
-      rows = rows.concat(data || []);
-      if (!data || data.length < PAGE) break;
+      const { data: response, error } = await supabase.rpc('search_results_page', {
+        p_search_id: searchId,
+        p_offset: page * PAGE,
+        p_limit: PAGE,
+        p_filters: cleanFilters(filters),
+        p_with_count: false,
+      });
+      let data;
+      if (error && isMissingRpc(error)) {
+        let legacyQuery = supabase.from('results').select('*').eq('search_id', searchId);
+        legacyQuery = applyFilters(legacyQuery, filters)
+          .order('created_at', { ascending: false })
+          .range(page * PAGE, page * PAGE + PAGE - 1);
+        const legacy = await legacyQuery;
+        if (legacy.error) throw legacy.error;
+        data = legacy.data || [];
+      } else {
+        if (error) throw error;
+        data = response?.data || [];
+      }
+      rows = rows.concat(data);
+      if (data.length < PAGE) break;
     }
     downloadCsv(`leads_${searchId}`, rows);
     return { success: true };
@@ -453,10 +614,30 @@ export const api = {
 
   // ── Importação manual (CSV/planilha) ──────────────────────────────────────
   // Usa a mesma função de dedup/merge do Supabase que a extensão usa.
-  importLeads: async (keyword, city, leads) => {
-    const { data, error } = await supabase.rpc('import_leads', {
-      p_keyword: keyword || 'planilha', p_city: city || '', p_leads: leads,
+  importLeads: async (keyword, city, leads, options = {}) => {
+    const metadata = {
+      ...(options.metadata || {}),
+      ...(options.originalFilename ? { originalFilename: options.originalFilename } : {}),
+      ...(options.format ? { format: options.format } : {}),
+    };
+    const { data, error } = await supabase.rpc('import_leads_v2', {
+      p_keyword: keyword || 'planilha',
+      p_city: city || '',
+      p_leads: leads,
+      p_source: options.source || 'spreadsheet',
+      p_mining_job_id: options.miningJobId || null,
+      p_idempotency_key: options.idempotencyKey || makeIdempotencyKey('import'),
+      p_metadata: metadata,
+      p_conflict_strategy: options.conflictStrategy || 'merge',
     });
+    if (error && isMissingRpc(error)) {
+      const legacy = await supabase.rpc('import_leads', {
+        p_keyword: keyword || 'planilha', p_city: city || '', p_leads: leads,
+      });
+      if (legacy.error) throw legacy.error;
+      clearMapLeadsCache();
+      return { success: true, data: legacy.data };
+    }
     if (error) throw error;
     clearMapLeadsCache();
     return { success: true, data };

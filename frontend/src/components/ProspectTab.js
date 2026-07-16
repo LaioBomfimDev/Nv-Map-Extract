@@ -1,12 +1,20 @@
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { api } from '../api';
 import useDebouncedValue from '../hooks/useDebounce';
+import useRefreshOnFocus from '../hooks/useRefreshOnFocus';
 import LeadModal from './LeadModal';
 import { STATUS_OPTIONS, getStatusMeta, getWhatsAppUrl, timeSince } from '../statuses';
 import { LayoutGrid, Clock, Lightbulb, Zap, X, Pin, Send, XCircle, Trash2, StickyNote, MessageCircle, ArrowRight, Tag, MapPin, AlertTriangle, DynIcon } from './Icons';
 
 const card = { background: '#18181b', border: '1px solid #27272a', borderRadius: 0 };
 const LIMIT = 50;
+const MAX_FILTER_SELECTION = 1000;
+
+async function runInChunks(ids, action, size = 200) {
+  for (let index = 0; index < ids.length; index += size) {
+    await action(ids.slice(index, index + size));
+  }
+}
 
 // Linha da lista de leads memoizada: só re-renderiza quando ESTE lead muda
 // (dados ou seleção), em vez de a lista inteira a cada clique de checkbox.
@@ -19,7 +27,7 @@ const ProspectRow = memo(function ProspectRow({ lead, isSelected, onToggleSelect
         onMouseEnter={e => e.currentTarget.style.background = 'rgba(16,185,129,0.04)'}
         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
       <td style={{ padding: '14px 14px' }} onClick={e => e.stopPropagation()}>
-        <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(lead.id)} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
+        <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(lead.id)} aria-label={`Selecionar ${lead.name || 'lead'}`} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
       </td>
       <td onClick={() => onOpen(lead)} style={{ padding: '14px 14px', maxWidth: 220 }}>
         <div style={{ color: '#fafafa', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }} title={lead.name}>
@@ -73,6 +81,8 @@ export default function ProspectTab() {
   const [selected, setSelected]   = useState(new Set());
   const [modalLead, setModalLead] = useState(null);
   const [actionMsg, setActionMsg] = useState('');
+  const [error, setError] = useState('');
+  const [selectingAll, setSelectingAll] = useState(false);
 
   // Estados do Modo Mutirão
   const [mutiraoActive, setMutiraoActive] = useState(false);
@@ -93,24 +103,31 @@ export default function ProspectTab() {
 
   // Debounce só no texto digitado; filtros por clique (status/sugestão) seguem na hora.
   const debouncedName = useDebouncedValue(nameFilter, 350);
+  const activeFilters = useMemo(() => {
+    const next = { ...extraFilters };
+    if (statusFilter) next.prospect_status = statusFilter;
+    if (debouncedName) next.name = debouncedName;
+    return next;
+  }, [extraFilters, statusFilter, debouncedName]);
 
   // `forceCount`: recontar o total mesmo fora da 1ª página — usado após
   // apagar/mover leads em lote, quando o total muda mas a página não.
   const loadLeads = useCallback(async (forceCount = false) => {
     setLoading(true);
+    setError('');
     try {
-      const filters = { ...extraFilters };
-      if (statusFilter) filters.prospect_status = statusFilter;
-      if (debouncedName) filters.name = debouncedName;
       // COUNT(*) exato só na 1ª página; ao paginar reaproveita o total.
-      const res = await api.getAllLeads(page, LIMIT, filters, forceCount || page === 1);
+      const res = await api.getAllLeads(page, LIMIT, activeFilters, forceCount || page === 1);
       if (res.success) {
         setLeads(res.data.data || []);
         if (res.data.total != null) setTotal(res.data.total);
       }
-    } catch { /* Supabase indisponível */ }
-    setLoading(false);
-  }, [page, statusFilter, extraFilters, debouncedName]);
+    } catch {
+      setError('Não foi possível carregar os leads. Verifique a conexão e tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  }, [page, activeFilters]);
 
   const loadIgnored = useCallback(async () => {
     try {
@@ -123,6 +140,10 @@ export default function ProspectTab() {
   useEffect(() => { loadLeads(); }, [loadLeads]);
   useEffect(() => { loadIgnored(); }, [loadIgnored]);
   useEffect(() => { setPage(1); setSelected(new Set()); }, [statusFilter, extraFilters, debouncedName]);
+
+  const refreshRef = useRefreshOnFocus(useCallback(() => Promise.all([
+    loadSummary(), loadLeads(), loadIgnored(),
+  ]), [loadSummary, loadLeads, loadIgnored]));
 
   async function restoreIgnored(item) {
     try {
@@ -149,22 +170,53 @@ export default function ProspectTab() {
   }, []);
 
   const openModal = useCallback((lead) => setModalLead(lead), []);
+  const openTaskLead = useCallback((task) => {
+    const compactLead = task?.lead || (task?.result_id ? { id: task.result_id, name: 'Carregando lead...' } : null);
+    if (!compactLead?.id) return;
+    setModalLead(compactLead);
+    api.getLead?.(compactLead.id)
+      .then(response => { if (response?.success && response.data) setModalLead(current => current?.id === compactLead.id ? { ...current, ...response.data } : current); })
+      .catch(() => { /* mantém o resumo disponível */ });
+  }, []);
 
   function toggleSelectAll() {
-    setSelected(prev => prev.size === leads.length ? new Set() : new Set(leads.map(l => l.id)));
+    setSelected(prev => {
+      const next = new Set(prev);
+      const pageSelected = leads.length > 0 && leads.every(lead => next.has(lead.id));
+      leads.forEach(lead => pageSelected ? next.delete(lead.id) : next.add(lead.id));
+      return next;
+    });
+  }
+
+  async function selectAllFiltered() {
+    setSelectingAll(true);
+    setError('');
+    try {
+      const limit = Math.min(total, MAX_FILTER_SELECTION);
+      const res = await api.getAllLeads(1, limit, activeFilters, false);
+      const ids = (res.data.data || []).map(lead => lead.id).filter(id => id !== undefined && id !== null);
+      setSelected(new Set(ids));
+      flash(total > ids.length
+        ? `${ids.length.toLocaleString('pt-BR')} primeiros leads do filtro selecionados (limite de segurança)`
+        : `${ids.length.toLocaleString('pt-BR')} leads do filtro selecionados`);
+    } catch {
+      setError('Não foi possível selecionar todos os leads deste filtro.');
+    } finally {
+      setSelectingAll(false);
+    }
   }
 
   async function bulkAction(status, label) {
     const ids = [...selected];
     if (!ids.length) return;
     try {
-      await api.bulkStatus(ids, status);
-      flash(`✅ ${ids.length} leads movidos para "${label}"`);
+      await runInChunks(ids, chunk => api.bulkStatus(chunk, status));
+      flash(`${ids.length} leads movidos para "${label}"`);
       setSelected(new Set());
       loadLeads(true);
       loadSummary();
     } catch {
-      flash('❌ Erro ao atualizar leads');
+      flash('Erro ao atualizar leads');
     }
   }
 
@@ -173,14 +225,14 @@ export default function ProspectTab() {
     if (!ids.length) return;
     if (!window.confirm(`Apagar ${ids.length} leads definitivamente?`)) return;
     try {
-      await api.bulkDelete(ids);
-      flash(`🗑️ ${ids.length} leads apagados`);
+      await runInChunks(ids, chunk => api.bulkDelete(chunk));
+      flash(`${ids.length} leads apagados`);
       setSelected(new Set());
       loadLeads(true);
       loadSummary();
       loadIgnored();
     } catch {
-      flash('❌ Erro ao apagar leads');
+      flash('Erro ao apagar leads');
     }
   }
 
@@ -227,17 +279,26 @@ export default function ProspectTab() {
 
   const counts = summary?.statusCounts || {};
   const followUps = summary?.followUps || { count: 0, sample: [] };
+  const dueTasks = summary?.dueTasks || { count: 0, sample: [] };
   const suggestions = (summary?.suggestions || []).filter(s => s.count > 0);
   const totalLeads = Object.values(counts).reduce((a, b) => a + b, 0);
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
   const hasExtraFilters = Object.keys(extraFilters).length > 0;
+  const pageAllSelected = leads.length > 0 && leads.every(lead => selected.has(lead.id));
 
   return (
-    <div>
+    <div ref={refreshRef}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: '#fafafa', marginBottom: 4 }}>Prospecção</h1>
         <p style={{ color: '#52525b', fontSize: 14 }}>Controle quem já recebeu mensagem, quem está na fila e quem respondeu</p>
       </div>
+
+      {error && (
+        <div role="alert" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5', padding: '10px 14px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 7, fontSize: 13 }}>
+          <AlertTriangle size={14} color="#ef4444" /> <span>{error}</span>
+          <button type="button" onClick={() => loadLeads(true)} style={{ marginLeft: 'auto', background: 'transparent', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', padding: '5px 9px', cursor: 'pointer', fontSize: 11 }}>Tentar novamente</button>
+        </div>
+      )}
 
       {/* ——— Funil: cartões por status ——— */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 20 }}>
@@ -271,6 +332,29 @@ export default function ProspectTab() {
           );
         })}
       </div>
+
+      {/* ——— Agenda vencida ——— */}
+      {dueTasks.count > 0 && (
+        <section aria-labelledby="due-tasks-title" style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.28)', padding: '14px 18px', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <h2 id="due-tasks-title" style={{ color: '#fca5a5', fontSize: 13, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Clock size={14} color="#ef4444" /> {dueTasks.count} {dueTasks.count === 1 ? 'tarefa vencida' : 'tarefas vencidas'}
+              </h2>
+              <p style={{ color: '#71717a', fontSize: 11, margin: '3px 0 0' }}>Abra a ficha para concluir ou reagendar a próxima ação.</p>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {(dueTasks.sample || []).slice(0, 4).map(task => (
+                <button type="button" key={task.id} onClick={() => openTaskLead(task)}
+                  title={task.title}
+                  style={{ background: '#09090b', border: '1px solid rgba(239,68,68,0.3)', color: '#e4e4e7', padding: '6px 9px', cursor: 'pointer', fontSize: 11, maxWidth: 220, textAlign: 'left' }}>
+                  <strong style={{ color: '#fca5a5' }}>{task.lead?.name || 'Lead'}</strong> · {task.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ——— Alerta de follow-up ——— */}
       {followUps.count > 0 && (
@@ -335,7 +419,7 @@ export default function ProspectTab() {
           }}>
           {mutiraoLoading ? 'Carregando Fila...' : <><Zap size={14} /> Modo Mutirão</>}
         </button>
-        {actionMsg && <span style={{ fontSize: 13, color: '#10b981' }}>{actionMsg}</span>}
+        <span aria-live="polite" style={{ fontSize: 13, color: /Erro/.test(actionMsg) ? '#fca5a5' : '#10b981' }}>{actionMsg}</span>
       </div>
 
       {/* ——— Barra de ações em massa ——— */}
@@ -345,6 +429,12 @@ export default function ProspectTab() {
           padding: '10px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
         }}>
           <span className="mono" style={{ fontSize: 13, color: '#10b981', fontWeight: 600 }}>{selected.size} selecionados:</span>
+          {pageAllSelected && total > selected.size && (
+            <button type="button" onClick={selectAllFiltered} disabled={selectingAll}
+              style={{ background: 'rgba(6,182,212,0.12)', color: '#67e8f9', border: '1px solid rgba(6,182,212,0.35)', padding: '6px 13px', cursor: selectingAll ? 'wait' : 'pointer', fontSize: 12, fontWeight: 600 }}>
+              {selectingAll ? 'Selecionando...' : `Selecionar ${Math.min(total, MAX_FILTER_SELECTION).toLocaleString('pt-BR')} deste filtro`}
+            </button>
+          )}
           <button onClick={() => bulkAction('fila', 'Na fila')}
             style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.35)', padding: '6px 13px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
             <Pin size={12} color="#f59e0b" />
@@ -375,7 +465,7 @@ export default function ProspectTab() {
             <thead>
               <tr>
                 <th style={{ padding: '12px 14px', borderBottom: '1px solid #27272a', width: 36 }}>
-                  <input type="checkbox" checked={leads.length > 0 && selected.size === leads.length} onChange={toggleSelectAll} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
+                  <input type="checkbox" checked={pageAllSelected} onChange={toggleSelectAll} aria-label="Selecionar leads desta página" style={{ accentColor: '#10b981', cursor: 'pointer' }} />
                 </th>
                 {['Empresa', 'Status', 'Contato', 'Último contato', 'Origem', ''].map((h, i) => (
                   <th key={i} style={{ textAlign: 'left', padding: '12px 14px', color: '#52525b', fontWeight: 500, borderBottom: '1px solid #27272a', fontSize: 12, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>

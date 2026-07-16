@@ -6,9 +6,14 @@ Painel React para mineracao, prospeccao e inteligencia geografica de leads do Go
 
 - Dashboard com metricas e graficos vindos do Supabase
 - Historico de buscas e resultados importados pela extensao ou por planilha
+- Importacao guiada de CSV, TSV e XLSX, com mapeamento, validacao e previa
 - Prospecao com status, anotacoes, exclusao e lista de ignorados
+- Timeline comercial, tarefas e proximas acoes por lead
+- Campanhas transacionais com metricas historicas e follow-ups
 - Aba Mapa com clusters, legenda por tema, ficha completa do lead e sugestoes inteligentes por municipio
 - Inteligencia geografica baseada em densidade medida x populacao municipal
+- Mineracao rastreavel com ACK, progresso e historico de execucoes
+- Central de Atualizacoes com versao instalada, checksum, retry, FAQ e historico
 - Exportacao CSV client-side
 
 ## Arquitetura Atual
@@ -35,7 +40,8 @@ O frontend nao depende mais do backend Node para o uso normal. A pasta `backend/
 ## Configuracao
 
 1. Crie o projeto no Supabase.
-2. Rode `supabase/schema.sql` inteiro no SQL Editor.
+2. Em uma instalacao nova, rode `supabase/schema.sql` inteiro no SQL Editor.
+   Em uma instalacao existente, rode tambem `supabase/migration_data_workflows.sql`.
 3. Se precisar popular usuarios iniciais, use `supabase/seed_users.sql`.
 4. Crie `frontend/.env` com:
 
@@ -54,7 +60,8 @@ npm install
 npm start
 ```
 
-Acesse `http://localhost:3000`.
+Acesse `http://localhost:3008` (porta definida em `frontend/.env`). A extensao
+tambem reconhece `localhost` e `127.0.0.1` nas portas 3000 e 3008.
 
 Para gerar build de producao:
 
@@ -70,6 +77,21 @@ O deploy atual publica apenas o frontend:
 - `vercel.json` usa `cd frontend && npm ci` na instalacao e `cd frontend && npm run build` no build
 - output: `frontend/build`
 - banco, autenticacao e funcoes ficam no Supabase
+- URL oficial: `https://nv-map-extract.vercel.app`
+
+## Release da Extensao
+
+O manifest, o catalogo e o ZIP precisam ter a mesma versao. Para gerar um
+artefato local usando apenas a configuracao publica da extensao:
+
+```bash
+npm run release:extension -- --config-file=extension/config.js
+npm run validate:extension-release
+```
+
+O script inclui somente os arquivos permitidos, calcula SHA-256 e tamanho e
+atualiza `frontend/public/updates.json`. O workflow
+`.github/workflows/release-extension.yml` executa o mesmo processo com secrets.
 
 ## Mapa e Sugestoes
 

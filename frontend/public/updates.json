@@ -1,32 +1,49 @@
 {
+  "schemaVersion": 1,
   "latest": {
-    "version": "2.0.0",
-    "title": "Versao online com Supabase",
-    "releasedAt": "2026-07-08",
-    "downloadUrl": "",
-    "required": false,
-    "notes": "Preencha downloadUrl quando gerar o zip publico da extensao."
+    "version": "2.1.0",
+    "minimumSupportedVersion": "2.0.0",
+    "minimumChromeVersion": "102",
+    "channel": "stable",
+    "title": "Central de atualizações e mineração rastreável",
+    "releasedAt": "2026-07-11",
+    "downloadUrl": "/downloads/friendly-miner-2.1.0.zip",
+    "sha256": "6fe50c3b95bc54e0739b222e3cdd8bc47d36b7269c4d84c2f55b4ad0121c557f",
+    "sizeBytes": 34737,
+    "notes": "Atualização recomendada para melhorar a comunicação entre o painel e a extensão."
   },
   "history": [
     {
+      "version": "2.1.0",
+      "title": "Atualizações confiáveis e comunicação confirmada",
+      "releasedAt": "2026-07-11",
+      "changes": [
+        "Central de atualizações com diagnóstico da versão instalada.",
+        "Confirmação ao abrir a página de extensões e ao iniciar uma mineração.",
+        "Progresso da mineração retransmitido ao painel com identificação do trabalho.",
+        "Sessão mais segura: o refresh token permanece somente no painel.",
+        "Domínio de produção corrigido para nv-map-extract.vercel.app."
+      ]
+    },
+    {
       "version": "2.0.0",
-      "title": "Versao online com painel Vercel",
+      "title": "Versão online com painel Vercel",
       "releasedAt": "2026-07-08",
       "changes": [
         "Painel web conectado ao Supabase.",
-        "Login por email/senha e Google.",
-        "Extensao envia leads direto para a conta logada.",
-        "Base preparada para avisos de atualizacao manual."
+        "Login por e-mail/senha e Google.",
+        "Extensão envia leads direto para a conta logada.",
+        "Base preparada para avisos de atualização manual."
       ]
     },
     {
       "version": "1.0.0",
-      "title": "Primeira versao local",
+      "title": "Primeira versão local",
       "releasedAt": "2026-07-03",
       "changes": [
         "Dashboard inicial para visualizar leads.",
-        "Importacao de CSV.",
-        "Extracao pelo Google Maps via extensao."
+        "Importação de CSV.",
+        "Extração pelo Google Maps via extensão."
       ]
     }
   ]

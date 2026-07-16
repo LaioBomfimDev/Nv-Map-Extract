@@ -7,8 +7,33 @@ var auto_extract_flag = false;
 var leads = [];
 var leads_lnglat = new Set();
 var collect_email = true;
+var enrichmentTasks = new Set();
 // Captura AGORA se a busca foi disparada pelo site (o Maps reescreve a URL depois).
-var fmAutoMode = (location.hash || '').includes('fm_auto');
+var fmInitialHash = document.documentElement.getAttribute('data-fm-auto-hash') || location.hash || '';
+var fmAutoMode = fmInitialHash.includes('fm_auto');
+var fmJobMeta = {};
+try {
+    const encoded = fmInitialHash.match(/fm_auto=([^&]+)/)?.[1];
+    if (encoded) fmJobMeta = JSON.parse(decodeURIComponent(encoded));
+} catch (_) { fmJobMeta = {}; }
+
+function reportMiningProgress(stage, extra) {
+    if (!fmAutoMode) return;
+    try {
+        chrome.runtime.sendMessage({
+            action: 'fmSearchProgress',
+            data: {
+                jobId: fmJobMeta.jobId || '',
+                query: fmJobMeta.query || '',
+                keyword: fmJobMeta.keyword || '',
+                city: fmJobMeta.city || '',
+                stage,
+                captured: leads.length,
+                ...(extra || {}),
+            },
+        });
+    } catch (_) {}
+}
 
 // ——— Criar interface flutuante ———————————————————————————————————
 (function () {
@@ -88,6 +113,7 @@ var fmAutoMode = (location.hash || '').includes('fm_auto');
         btnStart.innerHTML = '⏹ Parar Extração';
         btnStart.classList.add('mse_btn_stop');
         setStatus('Iniciando...', 'info');
+        reportMiningProgress('starting');
 
         // Clicar no botão de pesquisa do Maps para garantir que a lista carregou
         const searchBtn = document.querySelector('[role="search"] button');
@@ -114,6 +140,8 @@ var fmAutoMode = (location.hash || '').includes('fm_auto');
             auto_extract_flag = false;
             btnStart.innerHTML = '▶ Iniciar Extração';
             btnStart.classList.remove('mse_btn_stop');
+            reportMiningProgress('failed', { error: 'Painel lateral do Google Maps não detectado.' });
+            try { chrome.runtime.sendMessage({ action: 'fmSearchDone', ok: false, data: { ...fmJobMeta, error: 'Painel lateral não detectado' } }); } catch (_) {}
             return;
         }
 
@@ -153,6 +181,7 @@ var fmAutoMode = (location.hash || '').includes('fm_auto');
             }
 
             setStatus(`⚡ Extraindo... ${leads.length} leads capturados`, 'info');
+            reportMiningProgress('capturing');
         }
 
         auto_extract_flag = false;
@@ -170,8 +199,12 @@ var fmAutoMode = (location.hash || '').includes('fm_auto');
         // Envio AUTOMÁTICO ao terminar (sem precisar clicar em "Enviar").
         if (leads.length > 0) {
             setStatus(`⏳ Enriquecendo e enviando ${leads.length} leads...`, 'info');
-            await sleep(6000); // dá tempo do enriquecimento de e-mail/redes assentar
+            reportMiningProgress('enriching', { pendingEnrichment: enrichmentTasks.size });
+            await waitForEnrichment(20000);
             await doSend({ auto: fmAutoMode });
+        } else if (fmAutoMode) {
+            reportMiningProgress('failed', { error: 'Nenhum lead encontrado.' });
+            try { chrome.runtime.sendMessage({ action: 'fmSearchDone', ok: false, data: { ...fmJobMeta, error: 'Nenhum lead encontrado' } }); } catch (_) {}
         }
     });
 
@@ -185,6 +218,7 @@ var fmAutoMode = (location.hash || '').includes('fm_auto');
             return;
         }
         setStatus(`📤 Enviando ${leads.length} leads para o Dashboard...`, 'info');
+        reportMiningProgress('sending', { enriched: leads.filter(lead => lead.email || lead.instagram || lead.facebook || lead.linkedin).length });
         btnSend.disabled = true;
 
         const searchInput = document.querySelector('input[aria-label]');
@@ -195,17 +229,36 @@ var fmAutoMode = (location.hash || '').includes('fm_auto');
         return new Promise((resolve) => {
             chrome.runtime.sendMessage({
                 action: 'sendToDashboard',
-                data: { leads, keyword: searchTerm, city: '' },
+                data: {
+                    leads,
+                    keyword: fmJobMeta.keyword || searchTerm,
+                    city: fmJobMeta.city || '',
+                    source: 'extension',
+                    jobId: fmJobMeta.jobId || '',
+                },
             }, (response) => {
                 btnSend.disabled = false;
                 if (response?.success) {
                     setStatus(`✅ ${response.message || leads.length + ' leads enviados!'}`, 'success');
+                    reportMiningProgress('completed', { sent: leads.length, result: response.data || null });
                 } else {
                     setStatus(`❌ Falha: ${response?.message || 'Erro de conexão'}`, 'error');
+                    reportMiningProgress('failed', { error: response?.message || 'Erro de conexão', sent: 0 });
                 }
                 // Fluxo automático (janela pop-up disparada pelo site): fechar a janela.
                 if (auto) {
-                    try { chrome.runtime.sendMessage({ action: 'fmSearchDone', ok: !!(response && response.success) }); } catch (_) {}
+                    try {
+                        chrome.runtime.sendMessage({
+                            action: 'fmSearchDone',
+                            ok: !!(response && response.success),
+                            data: {
+                                ...fmJobMeta,
+                                captured: leads.length,
+                                sent: response?.success ? leads.length : 0,
+                                error: response?.success ? '' : (response?.message || 'Erro de conexão'),
+                            },
+                        });
+                    } catch (_) {}
                 }
                 resolve(response);
             });
@@ -230,6 +283,17 @@ var fmAutoMode = (location.hash || '').includes('fm_auto');
     });
 
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function waitForEnrichment(timeoutMs) {
+        const deadline = Date.now() + timeoutMs;
+        while (enrichmentTasks.size > 0 && Date.now() < deadline) {
+            await Promise.race([
+                Promise.allSettled(Array.from(enrichmentTasks)),
+                sleep(Math.min(750, Math.max(0, deadline - Date.now()))),
+            ]);
+            reportMiningProgress('enriching', { pendingEnrichment: enrichmentTasks.size });
+        }
+    }
 
     function setStatus(msg, type = 'neutral') {
         statusEl.textContent = msg;
@@ -355,7 +419,7 @@ function ingestLeads(newLeads) {
         leads_lnglat.add(key);
         leads.push(lead);
         added++;
-        (async () => {
+        const task = (async () => {
             try {
                 if (lead.website && collect_email) {
                     const d = await chrome.runtime.sendMessage({ action: 'email', data: { website: lead.website, name: lead.name, deep_search: true } });
@@ -366,8 +430,11 @@ function ingestLeads(newLeads) {
                 }
             } catch (_) {}
         })();
+        enrichmentTasks.add(task);
+        task.finally(() => enrichmentTasks.delete(task));
     }
     if (added && window._mse_updateCount) window._mse_updateCount(leads.length);
+    if (added) reportMiningProgress('capturing', { added });
     return added;
 }
 

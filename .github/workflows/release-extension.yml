@@ -1,0 +1,45 @@
+name: Publicar extensão
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Gerar ZIP, checksum e catálogo
+        env:
+          FM_SUPABASE_URL: ${{ secrets.FM_SUPABASE_URL }}
+          FM_SUPABASE_ANON_KEY: ${{ secrets.FM_SUPABASE_ANON_KEY }}
+          FM_APP_URL: https://nv-map-extract.vercel.app
+        run: node scripts/release-extension.mjs
+
+      - name: Validar paridade do release
+        run: node scripts/release-extension.mjs --validate
+
+      - name: Guardar artefato da execução
+        uses: actions/upload-artifact@v4
+        with:
+          name: friendly-miner-extension
+          path: frontend/public/downloads/*.zip
+          if-no-files-found: error
+
+      - name: Publicar artefato e catálogo no repositório
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/public/updates.json frontend/public/downloads/*.zip
+          git diff --cached --quiet && exit 0
+          git commit -m "release: extensão $(node -p \"require('./extension/manifest.json').version\")"
+          git push

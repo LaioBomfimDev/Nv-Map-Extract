@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { api } from '../api';
 import useDebouncedValue from '../hooks/useDebounce';
+import useRefreshOnFocus from '../hooks/useRefreshOnFocus';
 import MapView from './MapView';
 import LeadModal from './LeadModal';
 import { STATUS_OPTIONS, getWhatsAppUrl } from '../statuses';
@@ -52,7 +53,7 @@ const ResultRow = memo(function ResultRow({ row, isSelected, onToggleSelect, onS
         >
             {/* Seleção */}
             <td style={{ padding: '14px 14px' }}>
-                <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(row.id)} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
+                <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(row.id)} aria-label={`Selecionar ${row.name || 'lead'}`} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
             </td>
 
             {/* Nome (abre a ficha da empresa) */}
@@ -171,6 +172,7 @@ export default function ResultsTable({ search }) {
     const [selected, setSelected] = useState(new Set());
     const [modalLead, setModalLead] = useState(null);
     const [actionMsg, setActionMsg] = useState('');
+    const [error, setError] = useState('');
 
     // Estados dos Filtros Avançados
     const [filters, setFilters] = useState({
@@ -198,6 +200,7 @@ export default function ResultsTable({ search }) {
     const load = useCallback(async (forceCount = false) => {
         if (!search?.id) return;
         setLoading(true);
+        setError('');
         try {
             // Limpa filtros vazios antes de enviar
             const activeFilters = {};
@@ -215,6 +218,7 @@ export default function ResultsTable({ search }) {
             }
         } catch (e) {
             console.error('Erro ao carregar resultados:', e);
+            setError('Não foi possível atualizar os leads desta importação.');
         }
         setLoading(false);
     }, [search, page, debouncedFilters]);
@@ -229,6 +233,8 @@ export default function ResultsTable({ search }) {
         load(); 
     }, [load]);
 
+    const refreshRef = useRefreshOnFocus(useCallback(() => load(true), [load]));
+
     // Estáveis (useCallback) para que a memoização das linhas funcione: se o
     // handler mudasse de identidade a cada render, todas as linhas re-renderizariam.
     const handleStatusChange = useCallback(async (resultId, newStatus) => {
@@ -239,6 +245,7 @@ export default function ResultsTable({ search }) {
             }
         } catch (e) {
             console.error('Erro ao atualizar status comercial:', e);
+            setError('Não foi possível alterar o status do lead.');
         }
     }, []);
 
@@ -288,11 +295,11 @@ export default function ResultsTable({ search }) {
         if (!ids.length) return;
         try {
             await api.bulkStatus(ids, status);
-            flash(`✅ ${ids.length} leads movidos para "${label}"`);
+            flash(`${ids.length} leads movidos para "${label}"`);
             setSelected(new Set());
             load(true);
         } catch {
-            flash('❌ Erro ao atualizar leads');
+            flash('Erro ao atualizar leads');
         }
     };
 
@@ -302,11 +309,11 @@ export default function ResultsTable({ search }) {
         if (!window.confirm(`Apagar ${ids.length} leads definitivamente?`)) return;
         try {
             await api.bulkDelete(ids);
-            flash(`🗑️ ${ids.length} leads apagados`);
+            flash(`${ids.length} leads apagados`);
             setSelected(new Set());
             load(true);
         } catch {
-            flash('❌ Erro ao apagar leads');
+            flash('Erro ao apagar leads');
         }
     };
 
@@ -323,7 +330,13 @@ export default function ResultsTable({ search }) {
     const totalPages = Math.max(1, Math.ceil(total / LIMIT));
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div ref={refreshRef} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {error && (
+                <div role="alert" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5', padding: '9px 12px', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <span>{error}</span>
+                    <button type="button" onClick={() => load(true)} style={{ background: 'transparent', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>Tentar novamente</button>
+                </div>
+            )}
             {/* Header com botões de ação e exportação */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
                 <div>
@@ -526,7 +539,7 @@ export default function ResultsTable({ search }) {
                     </button>
                 </div>
             )}
-            {actionMsg && <span style={{ fontSize: 13, color: '#10b981' }}>{actionMsg}</span>}
+            {actionMsg && <span role="status" aria-live="polite" style={{ fontSize: 13, color: actionMsg.includes('Erro') ? '#fca5a5' : '#10b981' }}>{actionMsg}</span>}
 
             {/* Layout Flexbox com Mapa Lateral (Split Screen) */}
             <div className="responsive-split" style={{ display: 'flex', gap: 20, alignItems: 'start', flexWrap: 'wrap' }}>
@@ -537,7 +550,7 @@ export default function ResultsTable({ search }) {
                             <thead>
                                 <tr>
                                     <th style={{ padding: '12px 14px', borderBottom: '1px solid #27272a', width: 36 }}>
-                                        <input type="checkbox" checked={data.length > 0 && selected.size === data.length} onChange={toggleSelectAll} style={{ accentColor: '#10b981', cursor: 'pointer' }} />
+                                        <input type="checkbox" checked={data.length > 0 && selected.size === data.length} onChange={toggleSelectAll} aria-label="Selecionar leads desta página" style={{ accentColor: '#10b981', cursor: 'pointer' }} />
                                     </th>
                                     {cols.map(c => (
                                         <th key={c.key} style={{ textAlign: 'left', padding: '12px 16px', color: '#52525b', fontWeight: 500, borderBottom: '1px solid #27272a', whiteSpace: 'nowrap', fontSize: 12 }}>

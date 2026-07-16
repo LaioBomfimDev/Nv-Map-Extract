@@ -6,7 +6,7 @@ import React from 'react';
 // Usage: <IconName size={16} color="#10b981" />
 // ============================================================
 
-const I = ({ children, size = 16, color = 'currentColor', fill = 'none', style, ...props }) => (
+const I = ({ children, size = 16, color = 'currentColor', fill = 'none', style, 'aria-label': ariaLabel, ...props }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width={size}
@@ -17,6 +17,10 @@ const I = ({ children, size = 16, color = 'currentColor', fill = 'none', style, 
     strokeWidth={2}
     strokeLinecap="round"
     strokeLinejoin="round"
+    aria-hidden={ariaLabel ? undefined : true}
+    aria-label={ariaLabel}
+    role={ariaLabel ? 'img' : undefined}
+    focusable="false"
     style={{ flexShrink: 0, display: 'inline-block', verticalAlign: 'middle', ...style }}
     {...props}
   >

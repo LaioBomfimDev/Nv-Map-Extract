@@ -1,7 +1,8 @@
 {
     "manifest_version": 3,
     "name": "Friendly Miner Extractor",
-    "version": "2.0.0",
+    "version": "2.1.0",
+    "minimum_chrome_version": "102",
     "description": "O seu companheiro amigável para minerar leads do Google Maps e enviar diretamente para o seu dashboard.",
     "icons": {
         "16":  "icons/icon16.png",
@@ -12,8 +13,11 @@
     "content_scripts": [
         {
             "matches": [
-                "https://mapssearch-dashboard.vercel.app/*",
-                "http://localhost:3008/*"
+                "https://nv-map-extract.vercel.app/*",
+                "http://localhost:3000/*",
+                "http://localhost:3008/*",
+                "http://127.0.0.1:3000/*",
+                "http://127.0.0.1:3008/*"
             ],
             "js": ["authBridge.js"],
             "run_at": "document_idle"
