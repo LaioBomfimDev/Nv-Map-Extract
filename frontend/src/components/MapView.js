@@ -30,7 +30,7 @@ export default function MapView({ leads }) {
             });
 
             // Adiciona a camada de mapa (CartoDB Dark Matter para combinar com o tema escuro do Dashboard)
-            window.L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            window.L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png?key=cb1_51h2_1_d55cd7af3a880d00b65454b7', {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                 subdomains: 'abcd',
                 maxZoom: 20

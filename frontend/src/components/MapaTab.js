@@ -15,7 +15,7 @@ import MapaSuggestions from './MapaSuggestions';
 import LeadModal from './LeadModal';
 import { Map as MapIcon, Send, Building2, Target, Trash2, Play, Lightbulb } from './Icons';
 
-const DARK_TILES = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+const DARK_TILES = 'https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png?key=cb1_51h2_1_d55cd7af3a880d00b65454b7';
 const TILE_OPTS = {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
   subdomains: 'abcd',
