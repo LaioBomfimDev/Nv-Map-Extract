@@ -1,18 +1,28 @@
 {
   "schemaVersion": 1,
   "latest": {
-    "version": "2.1.1",
+    "version": "2.1.2",
     "minimumSupportedVersion": "2.0.0",
     "minimumChromeVersion": "102",
     "channel": "stable",
-    "title": "Fluxo direto para o Dashboard Oficial",
+    "title": "Instalador e Atualizador em 1 Clique",
     "releasedAt": "2026-11-10",
-    "downloadUrl": "/downloads/friendly-miner-2.1.1.zip",
-    "sha256": "2e1c4ec8ba5f148ccf5fd753b9e75610b0b0d35229e657d57fa150f2c5493955",
-    "sizeBytes": 31311,
-    "notes": "Download direto de CSV no Maps, acesso em 1 clique ao Dashboard Oficial e remoção da página legada."
+    "downloadUrl": "/downloads/friendly-miner-2.1.2.zip",
+    "sha256": "0f49da1778d1306927f2883dcd42dc2abdb308a8869442b78bb28c33b87cf490",
+    "sizeBytes": 31388,
+    "notes": "Atualização direta na pasta com auto-reload sem abrir chrome://extensions e preparação de pasta em 1 clique."
   },
   "history": [
+    {
+      "version": "2.1.2",
+      "title": "Instalador e Atualizador em 1 Clique",
+      "releasedAt": "2026-11-10",
+      "changes": [
+        "Atualização direta da pasta pelo navegador com verificação SHA-256.",
+        "Auto-reload da extensão e reconexão instantânea ao painel após atualizar.",
+        "Guia visual simplificado para primeira instalação sem depender de WinRAR."
+      ]
+    },
     {
       "version": "2.1.1",
       "title": "Fluxo direto para o Dashboard Oficial",

@@ -8,7 +8,7 @@ import {
   FileText,
   FolderOpen,
   MessageCircle,
-  Upload,
+  Zap,
 } from './Icons';
 import {
   ExtensionUpdateProvider,
@@ -16,10 +16,15 @@ import {
   useOptionalExtensionUpdates,
 } from '../providers/ExtensionUpdateProvider';
 import { UPDATE_STATUS } from '../utils/extensionUpdates';
+import {
+  canDirectFolderInstall,
+  installOrUpdateExtensionInFolder,
+} from '../utils/extensionInstaller';
+import ChromeGuideMockup from './ChromeGuideMockup';
 
 const EXTENSIONS_URL = 'chrome://extensions';
 const SUPPORT_PHONE = '5571999575358';
-const SUPPORT_TEXT = encodeURIComponent('Oi, preciso de ajuda para atualizar a extensão Friendly Miner.');
+const SUPPORT_TEXT = encodeURIComponent('Oi, preciso de ajuda para instalar/atualizar a extensão Friendly Miner.');
 const SUPPORT_URL = `https://wa.me/${SUPPORT_PHONE}?text=${SUPPORT_TEXT}`;
 
 const card = {
@@ -50,6 +55,14 @@ const buttonBase = {
   gap: 8,
 };
 
+const STEP_LABELS = {
+  picking: 'Selecione a pasta da extensão no navegador…',
+  downloading: 'Baixando pacote oficial…',
+  unzipping: 'Verificando SHA-256 e extraindo arquivos…',
+  writing: 'Gravando arquivos limpos na pasta…',
+  reloading: 'Recarregando extensão automaticamente…',
+};
+
 function formatDate(date) {
   if (!date) return '';
   const parsed = new Date(`${date}T00:00:00`);
@@ -75,21 +88,27 @@ function formatChannel(channel) {
   return { stable: 'Estável', beta: 'Beta', preview: 'Prévia' }[channel] || channel || 'indisponível';
 }
 
-function SimpleStep({ number, title, text, icon: Icon }) {
-  return (
-    <div style={{ background: '#09090b', border: '1px solid #3f3f46', padding: 18, display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-      <div aria-hidden="true" style={{ width: 34, height: 34, background: 'rgba(16,185,129,0.14)', color: '#34d399', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
-        {number}
-      </div>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <Icon aria-hidden="true" size={15} color="#34d399" />
-          <strong style={{ color: '#fafafa', fontSize: 14 }}>{title}</strong>
-        </div>
-        <p style={{ color: '#b4b4bd', fontSize: 13, lineHeight: 1.55, margin: 0 }}>{text}</p>
-      </div>
-    </div>
-  );
+async function copyTextSafe(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_) {}
+  try {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.position = 'fixed';
+    el.style.left = '-9999px';
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand('copy');
+    el.remove();
+    return ok;
+  } catch (_) {
+    return false;
+  }
 }
 
 function statusPresentation(status, extensionVersion, minimumVersion, hasCachedMetadata) {
@@ -101,7 +120,7 @@ function statusPresentation(status, extensionVersion, minimumVersion, hasCachedM
         color: '#fbbf24',
         background: 'rgba(245,158,11,0.12)',
         border: 'rgba(245,158,11,0.45)',
-        text: 'Instale ou ative a extensão no Chrome deste computador para minerar pelo Google Maps.',
+        text: 'Prepare a pasta em 1 clique abaixo e carregue no Chrome para começar a minerar.',
       };
     case UPDATE_STATUS.CURRENT:
       return {
@@ -110,7 +129,7 @@ function statusPresentation(status, extensionVersion, minimumVersion, hasCachedM
         color: '#34d399',
         background: 'rgba(16,185,129,0.12)',
         border: 'rgba(16,185,129,0.45)',
-        text: 'A extensão instalada está na versão mais recente publicada.',
+        text: 'A extensão está na versão mais recente publicada e conectada ao painel.',
       };
     case UPDATE_STATUS.OUTDATED:
       return {
@@ -119,18 +138,18 @@ function statusPresentation(status, extensionVersion, minimumVersion, hasCachedM
         color: '#34d399',
         background: 'rgba(16,185,129,0.12)',
         border: 'rgba(16,185,129,0.45)',
-        text: 'Existe uma versão mais nova. Atualize para receber correções e melhorias.',
+        text: 'Atualize com 1 clique mantendo a mesma pasta — seus leads continuam intactos.',
       };
     case UPDATE_STATUS.INCOMPATIBLE:
       return {
         icon: AlertTriangle,
-        label: 'Versão incompatível',
+        label: 'Atualização obrigatória',
         color: '#f87171',
         background: 'rgba(239,68,68,0.12)',
         border: 'rgba(239,68,68,0.48)',
         text: extensionVersion
-          ? `A versão instalada não é mais compatível. Atualize para a versão ${minimumVersion} ou superior antes de iniciar uma nova mineração.`
-          : 'A extensão foi detectada, mas não informou uma versão válida. Recarregue ou reinstale a extensão.',
+          ? `Atualize para a versão ${minimumVersion} ou superior antes de iniciar novas minerações.`
+          : 'Recarregue ou atualize a pasta da extensão para continuar.',
       };
     case UPDATE_STATUS.METADATA_ERROR:
       return {
@@ -140,8 +159,8 @@ function statusPresentation(status, extensionVersion, minimumVersion, hasCachedM
         background: 'rgba(245,158,11,0.12)',
         border: 'rgba(245,158,11,0.45)',
         text: hasCachedMetadata
-          ? 'Não foi possível consultar o catálogo agora. As últimas informações válidas salvas neste navegador continuam visíveis.'
-          : 'Não foi possível consultar as versões publicadas. Verifique sua conexão e tente novamente.',
+          ? 'Mostrando a última versão salva em cache neste navegador.'
+          : 'Não foi possível consultar as versões agora. Tente verificar novamente.',
       };
     case UPDATE_STATUS.CHECKING:
     default:
@@ -151,7 +170,7 @@ function statusPresentation(status, extensionVersion, minimumVersion, hasCachedM
         color: '#67e8f9',
         background: 'rgba(6,182,212,0.1)',
         border: 'rgba(6,182,212,0.38)',
-        text: 'Estamos consultando o catálogo e procurando a extensão neste navegador.',
+        text: 'Procurando a extensão instalada neste navegador…',
       };
   }
 }
@@ -168,11 +187,16 @@ function UpdatesTabContent({ updateState }) {
     lastCheckedAt,
     checkNow,
     openExtensionsPage,
+    reloadExtension,
   } = updateState;
+
   const [copyState, setCopyState] = useState('idle');
   const [openState, setOpenState] = useState('idle');
+  const [directPhase, setDirectPhase] = useState('idle'); // idle | working | done_install | done_reload_auto | done_reload_manual | error
   const [actionMessage, setActionMessage] = useState('');
+  const [actionIsError, setActionIsError] = useState(false);
 
+  const directSupported = canDirectFolderInstall();
   const presentation = useMemo(() => statusPresentation(
     status,
     extension.version,
@@ -181,11 +205,11 @@ function UpdatesTabContent({ updateState }) {
   ), [extension.version, latest, status]);
   const StatusIcon = presentation.icon;
   const hasDownload = Boolean(latest?.downloadUrl);
-  const shouldDownloadUpdate = [UPDATE_STATUS.OUTDATED, UPDATE_STATUS.INCOMPATIBLE].includes(status);
+  const needsUpdate = [UPDATE_STATUS.OUTDATED, UPDATE_STATUS.INCOMPATIBLE].includes(status);
 
   useEffect(() => {
     if (copyState !== 'copied') return undefined;
-    const timer = setTimeout(() => setCopyState('idle'), 5000);
+    const timer = setTimeout(() => setCopyState('idle'), 4000);
     return () => clearTimeout(timer);
   }, [copyState]);
 
@@ -200,30 +224,78 @@ function UpdatesTabContent({ updateState }) {
   }, []);
 
   async function copyExtensionsAddress() {
-    try {
-      await navigator.clipboard.writeText(EXTENSIONS_URL);
-      setCopyState('copied');
-      setActionMessage('Endereço copiado. Cole-o na barra de endereços do Chrome.');
-    } catch (_) {
-      setCopyState('failed');
-      setActionMessage('Não foi possível copiar automaticamente. Digite chrome://extensions na barra do Chrome.');
-    }
+    const ok = await copyTextSafe(EXTENSIONS_URL);
+    setCopyState(ok ? 'copied' : 'failed');
+    setActionIsError(!ok);
+    setActionMessage(
+      ok
+        ? 'Endereço copiado! Cole chrome://extensions na barra do navegador.'
+        : 'Copie manualmente: chrome://extensions',
+    );
   }
 
   async function requestExtensionsPage() {
     setOpenState('opening');
-    setActionMessage('Pedindo para a extensão abrir a página do Chrome…');
+    setActionIsError(false);
+    setActionMessage('Abrindo chrome://extensions…');
     const result = await openExtensionsPage();
     setOpenState(result.ok ? 'opened' : 'failed');
+    setActionIsError(!result.ok);
     setActionMessage(result.message);
   }
 
-  function scrollToFaq() {
-    document.getElementById('updates-faq')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  async function handleDirectInstallOrUpdate() {
+    if (!hasDownload || directPhase === 'working') return;
+    setDirectPhase('working');
+    setActionIsError(false);
+    setActionMessage(STEP_LABELS.picking);
+
+    try {
+      const result = await installOrUpdateExtensionInFolder({
+        downloadUrl: latest.downloadUrl,
+        expectedSha256: latest.sha256,
+        onStep: (step) => {
+          setActionMessage(STEP_LABELS[step] || 'Processando…');
+        },
+      });
+
+      if (result.cancelled) {
+        setDirectPhase('idle');
+        setActionMessage('');
+        return;
+      }
+
+      if (extension.installed) {
+        setActionMessage(STEP_LABELS.reloading);
+        const reloadRes = extension.supportsReload && reloadExtension
+          ? await reloadExtension()
+          : { ok: false };
+
+        if (reloadRes.ok) {
+          setDirectPhase('done_reload_auto');
+          setActionIsError(false);
+          setActionMessage(`Extensão v${latest.version} gravada em "${result.folderName}" e recarregada automaticamente!`);
+        } else {
+          setDirectPhase('done_reload_manual');
+          setActionIsError(false);
+          setActionMessage(`Arquivos gravados em "${result.folderName}"! Agora clique em "Abrir extensões" e aperte ↻ Recarregar (a partir da v2.1.2 recarrega sozinho).`);
+          if (openExtensionsPage) await openExtensionsPage().catch(() => {});
+        }
+      } else {
+        setDirectPhase('done_install');
+        setActionIsError(false);
+        setActionMessage(`Pasta "${result.folderName}" pronta (${result.fileCount} arquivos)! Agora carregue ela em chrome://extensions.`);
+      }
+    } catch (err) {
+      setDirectPhase('error');
+      setActionIsError(true);
+      setActionMessage(err?.message || 'Não foi possível gravar na pasta. Use "Baixar .ZIP" como alternativa.');
+    }
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      {/* Card Principal */}
       <div style={{ ...card, background: 'linear-gradient(135deg, rgba(16,185,129,0.12), rgba(6,182,212,0.06))' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 360px' }}>
@@ -236,242 +308,241 @@ function UpdatesTabContent({ updateState }) {
               <StatusIcon aria-hidden="true" size={14} color={presentation.color} />
               {presentation.label}
             </div>
-            <h2 style={{ fontSize: 22, fontWeight: 800, color: '#fafafa', margin: '0 0 8px' }}>Central de atualizações</h2>
-            <p style={{ color: '#b4b4bd', fontSize: 14, lineHeight: 1.6, margin: 0, maxWidth: 760 }}>
-              {presentation.text} Seus leads ficam salvos no painel; remover ou trocar a extensão não apaga os dados.
+            <h2 style={{ fontSize: 22, fontWeight: 800, color: '#fafafa', margin: '0 0 8px' }}>
+              Instalador & Atualizações
+            </h2>
+            <p style={{ color: '#b4b4bd', fontSize: 14, lineHeight: 1.6, margin: 0, maxWidth: 680 }}>
+              {presentation.text}
             </p>
           </div>
 
-          <div style={{ minWidth: 270, background: '#09090b', border: '1px solid #3f3f46', padding: 16 }}>
-            <dl style={{ display: 'grid', gridTemplateColumns: '1fr auto', rowGap: 9, columnGap: 16, fontSize: 13, margin: 0 }}>
-              <dt style={{ color: '#a1a1aa' }}>Instalada</dt>
+          <div style={{ minWidth: 255, background: '#09090b', border: '1px solid #3f3f46', padding: 15 }}>
+            <dl style={{ display: 'grid', gridTemplateColumns: '1fr auto', rowGap: 8, columnGap: 16, fontSize: 13, margin: 0 }}>
+              <dt style={{ color: '#a1a1aa' }}>Sua versão</dt>
               <dd className="mono" style={{ color: extension.installed ? '#e4e4e7' : '#fbbf24', fontWeight: 700, margin: 0 }}>{extension.version || 'não detectada'}</dd>
-              <dt style={{ color: '#a1a1aa' }}>Mais recente</dt>
+              <dt style={{ color: '#a1a1aa' }}>Disponível</dt>
               <dd className="mono" style={{ color: '#34d399', fontWeight: 700, margin: 0 }}>{latest?.version || 'indisponível'}</dd>
-              <dt style={{ color: '#a1a1aa' }}>Mínima compatível</dt>
-              <dd className="mono" style={{ color: '#e4e4e7', fontWeight: 700, margin: 0 }}>{latest?.minimumSupportedVersion || 'indisponível'}</dd>
-              <dt style={{ color: '#a1a1aa' }}>Canal</dt>
-              <dd style={{ color: '#e4e4e7', fontWeight: 700, margin: 0 }}>{formatChannel(latest?.channel)}</dd>
-              <dt style={{ color: '#a1a1aa' }}>Chrome mínimo</dt>
-              <dd className="mono" style={{ color: '#e4e4e7', fontWeight: 700, margin: 0 }}>{latest?.minimumChromeVersion || 'indisponível'}</dd>
+              <dt style={{ color: '#a1a1aa' }}>Tamanho</dt>
+              <dd className="mono" style={{ color: '#e4e4e7', fontWeight: 700, margin: 0 }}>{formatBytes(latest?.sizeBytes) || '—'}</dd>
               <dt style={{ color: '#a1a1aa' }}>Lançamento</dt>
               <dd className="mono" style={{ color: '#b4b4bd', fontWeight: 700, margin: 0 }}>{formatDate(latest?.releasedAt) || '—'}</dd>
             </dl>
-            <p className="mono" style={{ color: '#a1a1aa', fontSize: 11, lineHeight: 1.5, margin: '14px 0 0', borderTop: '1px solid #27272a', paddingTop: 10 }}>
-              Última verificação: {formatDateTime(lastCheckedAt)}
+            <p className="mono" style={{ color: '#71717a', fontSize: 11, margin: '12px 0 0', borderTop: '1px solid #27272a', paddingTop: 9 }}>
+              {formatChannel(latest?.channel)} · Verificado: {formatDateTime(lastCheckedAt)}
             </p>
           </div>
         </div>
 
         {status === UPDATE_STATUS.METADATA_ERROR && (
-          <div role="alert" style={{ marginTop: 18, border: '1px solid rgba(245,158,11,0.42)', background: 'rgba(245,158,11,0.08)', color: '#fde68a', padding: 14, fontSize: 13, lineHeight: 1.55 }}>
-            <strong>Falha ao consultar o catálogo.</strong> {metadataError}
-            {metadataCachedAt && <span> Dados salvos em {formatDateTime(metadataCachedAt)}.</span>}
+          <div role="alert" style={{ marginTop: 16, border: '1px solid rgba(245,158,11,0.42)', background: 'rgba(245,158,11,0.08)', color: '#fde68a', padding: 12, fontSize: 13 }}>
+            <strong>Falha ao consultar catálogo.</strong> {metadataError}
+            {metadataCachedAt && <span> Último cache: {formatDateTime(metadataCachedAt)}.</span>}
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 22 }}>
+        {/* Ações principais — 1 Clique primeiro, ZIP clássico em segundo */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 22 }}>
+          {hasDownload && directSupported && (
+            <button
+              type="button"
+              onClick={handleDirectInstallOrUpdate}
+              disabled={directPhase === 'working'}
+              style={{
+                ...buttonBase,
+                background: 'linear-gradient(135deg,#10b981,#059669)',
+                color: '#fff',
+                border: '1px solid #10b981',
+                cursor: directPhase === 'working' ? 'wait' : 'pointer',
+                opacity: directPhase === 'working' ? 0.75 : 1,
+              }}
+            >
+              <Zap aria-hidden="true" size={16} />
+              {directPhase === 'working'
+                ? 'Aplicando na pasta…'
+                : extension.installed
+                  ? (needsUpdate ? `Atualizar em 1 clique (v${latest.version})` : `Regravar pasta (v${latest.version})`)
+                  : `Preparar pasta em 1 clique (v${latest.version})`}
+            </button>
+          )}
+
           {hasDownload ? (
             <a
               href={latest.downloadUrl}
               download
               rel="noopener noreferrer"
-              style={{ ...buttonBase, background: 'linear-gradient(135deg,#10b981,#059669)', color: '#fff', textDecoration: 'none', border: '1px solid #10b981' }}
+              style={{
+                ...buttonBase,
+                background: directSupported ? 'rgba(39,39,42,0.75)' : 'linear-gradient(135deg,#10b981,#059669)',
+                color: '#fafafa',
+                textDecoration: 'none',
+                border: directSupported ? '1px solid #52525b' : '1px solid #10b981',
+              }}
             >
               <Download aria-hidden="true" size={16} />
-              {shouldDownloadUpdate ? `Baixar atualização ${latest.version}` : `Baixar extensão ${latest.version}`}
+              {directSupported ? `Baixar .ZIP (${formatBytes(latest?.sizeBytes) || latest.version})` : `Baixar extensão v${latest.version}`}
             </a>
           ) : (
+            <button type="button" disabled style={{ ...buttonBase, background: '#27272a', color: '#a1a1aa', border: '1px solid #52525b', cursor: 'not-allowed' }}>
+              <Download aria-hidden="true" size={16} />
+              Download indisponível
+            </button>
+          )}
+
+          {extension.installed && (
             <button
               type="button"
-              disabled
-              title="O arquivo desta versão ainda não foi publicado."
-              style={{ ...buttonBase, background: '#27272a', color: '#a1a1aa', border: '1px solid #52525b', cursor: 'not-allowed' }}
+              onClick={requestExtensionsPage}
+              disabled={openState === 'opening'}
+              style={{ ...buttonBase, background: 'rgba(39,39,42,0.75)', color: '#f4f4f5', border: '1px solid #52525b', cursor: 'pointer' }}
             >
-              <Download aria-hidden="true" size={16} color="#a1a1aa" />
-              Download ainda indisponível
+              <ExternalLink aria-hidden="true" size={15} />
+              Abrir chrome://extensions
             </button>
           )}
 
           <button
             type="button"
-            onClick={requestExtensionsPage}
-            disabled={openState === 'opening'}
-            aria-busy={openState === 'opening'}
-            style={{ ...buttonBase, background: 'rgba(39,39,42,0.7)', color: '#f4f4f5', border: '1px solid #52525b', cursor: openState === 'opening' ? 'wait' : 'pointer' }}
-          >
-            <ExternalLink aria-hidden="true" size={16} />
-            {openState === 'opening' ? 'Abrindo…' : 'Abrir extensões'}
-          </button>
-
-          <button
-            type="button"
             onClick={copyExtensionsAddress}
-            style={{ ...buttonBase, background: 'rgba(39,39,42,0.7)', color: '#f4f4f5', border: '1px solid #52525b', cursor: 'pointer' }}
+            style={{ ...buttonBase, background: 'rgba(39,39,42,0.75)', color: '#f4f4f5', border: '1px solid #52525b', cursor: 'pointer' }}
           >
-            <FileText aria-hidden="true" size={16} />
-            {copyState === 'copied' ? 'Endereço copiado' : 'Copiar endereço'}
+            <FileText aria-hidden="true" size={15} />
+            {copyState === 'copied' ? 'Copiado!' : 'Copiar chrome://extensions'}
           </button>
 
           <button
             type="button"
             onClick={checkNow}
             disabled={isChecking}
-            aria-busy={isChecking}
             style={{ ...buttonBase, background: 'rgba(6,182,212,0.1)', color: '#a5f3fc', border: '1px solid rgba(6,182,212,0.45)', cursor: isChecking ? 'wait' : 'pointer' }}
           >
-            <Clock aria-hidden="true" size={16} color="#a5f3fc" />
-            {isChecking ? 'Verificando…' : 'Verificar novamente'}
+            <Clock aria-hidden="true" size={15} color="#a5f3fc" />
+            {isChecking ? 'Verificando…' : 'Verificar'}
           </button>
+        </div>
 
-          <button
-            type="button"
-            onClick={scrollToFaq}
-            style={{ ...buttonBase, background: 'transparent', color: '#a5f3fc', border: '1px solid rgba(6,182,212,0.35)', cursor: 'pointer' }}
+        {actionMessage && (
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              marginTop: 14,
+              padding: '11px 14px',
+              background: actionIsError ? 'rgba(239,68,68,0.12)' : 'rgba(16,185,129,0.12)',
+              border: `1px solid ${actionIsError ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'}`,
+              color: actionIsError ? '#fecaca' : '#a7f3d0',
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}
           >
-            <MessageCircle aria-hidden="true" size={16} color="#a5f3fc" />
-            Preciso de ajuda
-          </button>
-        </div>
-
-        <p style={{ color: '#a1a1aa', fontSize: 12, lineHeight: 1.5, margin: '12px 0 0' }}>
-          Depois de baixar, extraia o ZIP. O Chrome carrega a pasta extraída que contém o arquivo <span className="mono">manifest.json</span>, não o ZIP.
-          {latest?.sizeBytes ? ` Tamanho: ${formatBytes(latest.sizeBytes)}.` : ''}
-        </p>
-        {latest?.sha256 && (
-          <p className="mono" title={latest.sha256} style={{ color: '#a1a1aa', fontSize: 11, overflowWrap: 'anywhere', margin: '6px 0 0' }}>
-            SHA-256: {latest.sha256}
-          </p>
+            {actionMessage}
+          </div>
         )}
-        <p role="status" aria-live="polite" aria-atomic="true" style={{ color: openState === 'failed' || copyState === 'failed' ? '#fca5a5' : '#a7f3d0', fontSize: 12, minHeight: 18, lineHeight: 1.5, margin: '8px 0 0' }}>
-          {actionMessage}
-        </p>
       </div>
 
-      <section aria-labelledby="update-guide-title" style={card}>
-        <h3 id="update-guide-title" style={{ fontSize: 16, fontWeight: 800, color: '#fafafa', margin: '0 0 6px' }}>Como atualizar sem se perder</h3>
-        <p style={{ color: '#b4b4bd', fontSize: 13, lineHeight: 1.55, margin: '0 0 18px' }}>
-          Mantenha a mesma pasta da extensão: substitua os arquivos e use o botão de recarregar do Chrome.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-          <SimpleStep number="1" title="Baixar e extrair" icon={Download} text="Baixe a nova versão e extraia o ZIP antes de continuar." />
-          <SimpleStep number="2" title="Substituir os arquivos" icon={FolderOpen} text="Copie os arquivos extraídos para a pasta antiga da extensão e confirme a substituição." />
-          <SimpleStep number="3" title="Recarregar e verificar" icon={Upload} text="Abra chrome://extensions, recarregue a Friendly Miner, volte a esta aba e clique em Verificar novamente." />
-        </div>
-        <div style={{ marginTop: 16, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.35)', padding: 14, color: '#bbf7d0', fontSize: 13, lineHeight: 1.55 }}>
-          Seus leads continuam salvos no painel durante todo o processo.
-        </div>
-      </section>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-        <section aria-labelledby="safe-update-title" style={{ ...card, borderLeft: '3px solid #10b981' }}>
-          <h3 id="safe-update-title" style={{ fontSize: 15, fontWeight: 700, color: '#fafafa', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Check aria-hidden="true" size={16} color="#34d399" />
-            O que você não precisa fazer
-          </h3>
-          <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[
-              'Não precisa criar outra conta.',
-              'Não precisa importar os leads novamente.',
-              'Não precisa apagar a extensão se souber onde está a pasta antiga.',
-              'Não perde dados ao atualizar, porque os leads ficam no Supabase.',
-            ].map(item => <li key={item} style={{ color: '#b4b4bd', fontSize: 13, lineHeight: 1.5 }}>{item}</li>)}
-          </ul>
-        </section>
-
-        <section aria-labelledby="clean-install-title" style={{ ...card, borderLeft: '3px solid #f59e0b' }}>
-          <h3 id="clean-install-title" style={{ fontSize: 15, fontWeight: 700, color: '#fafafa', margin: '0 0 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AlertTriangle aria-hidden="true" size={16} color="#fbbf24" />
-            Instalação do zero
-          </h3>
-          <p style={{ color: '#b4b4bd', fontSize: 13, lineHeight: 1.55, margin: '0 0 12px' }}>
-            Use este caminho se não encontrar a pasta antiga ou se a extensão continuar com erro.
-          </p>
-          <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[
-              'Abra chrome://extensions e ative o Modo do desenvolvedor no canto superior direito.',
-              'Remova a extensão antiga, se ela ainda estiver na lista.',
-              'Extraia o novo ZIP em uma pasta limpa e permanente.',
-              'Clique em Carregar sem compactação.',
-              'Selecione a pasta que contém o arquivo manifest.json.',
-              'Volte ao painel, mantenha esta aba aberta e clique em Verificar novamente.',
-            ].map(item => <li key={item} style={{ color: '#b4b4bd', fontSize: 13, lineHeight: 1.5 }}>{item}</li>)}
-          </ol>
-        </section>
-      </div>
-
-      <section id="updates-faq" tabIndex={-1} aria-labelledby="updates-faq-title" style={{ ...card, borderLeft: '3px solid #06b6d4', scrollMarginTop: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 16 }}>
-          <div style={{ flex: '1 1 360px' }}>
-            <h3 id="updates-faq-title" style={{ fontSize: 16, fontWeight: 800, color: '#fafafa', margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <MessageCircle aria-hidden="true" size={17} color="#67e8f9" />
-              FAQ e suporte
+      {/* Guia Visual Enxuto (2 cards curtos + mock visual do Chrome) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: 16 }}>
+        <section aria-labelledby="first-install-title" style={{ ...card, borderLeft: '3px solid #10b981', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <h3 id="first-install-title" style={{ fontSize: 16, fontWeight: 800, color: '#fafafa', margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <FolderOpen aria-hidden="true" size={16} color="#34d399" />
+              Primeira instalação (2 passos)
             </h3>
-            <p style={{ color: '#b4b4bd', fontSize: 13, lineHeight: 1.55, margin: 0 }}>
-              As dúvidas comuns ficam visíveis para consulta. Se precisar, fale com o suporte pelo WhatsApp.
+            <p style={{ color: '#a1a1aa', fontSize: 13, margin: 0, lineHeight: 1.5 }}>
+              Sem WinRAR: clique em <strong>Preparar pasta em 1 clique</strong>, crie/escolha uma subpasta (ex: <span className="mono">FriendlyMiner</span>) e carregue no Chrome.
+            </p>
+          </div>
+          <ChromeGuideMockup mode="install" />
+          <p style={{ color: '#71717a', fontSize: 12, margin: 0 }}>
+            Cole <span className="mono" style={{ color: '#e4e4e7' }}>chrome://extensions</span> na barra do Chrome, ligue <strong>Modo do desenvolvedor</strong> e arraste a pasta (ou use <em>Carregar sem compactação</em>).
+          </p>
+        </section>
+
+        <section aria-labelledby="fast-update-title" style={{ ...card, borderLeft: '3px solid #06b6d4', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <h3 id="fast-update-title" style={{ fontSize: 16, fontWeight: 800, color: '#fafafa', margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Zap aria-hidden="true" size={16} color="#67e8f9" />
+              Atualização rápida (sem perder nada)
+            </h3>
+            <p style={{ color: '#a1a1aa', fontSize: 13, margin: 0, lineHeight: 1.5 }}>
+              Clique em <strong>Atualizar em 1 clique</strong> e confirme a mesma pasta. O sistema atualiza os arquivos e recarrega a extensão sozinha (a partir da v2.1.2).
+            </p>
+          </div>
+          <ChromeGuideMockup mode="update" />
+          <p style={{ color: '#71717a', fontSize: 12, margin: 0 }}>
+            Se você ainda estiver na v2.1.0/v2.1.1, só esta última vez aperte <strong>↻ Recarregar</strong> no Chrome depois de gravar a pasta.
+          </p>
+        </section>
+      </div>
+
+      {/* Suporte direto & FAQ compacto */}
+      <section id="updates-faq" tabIndex={-1} aria-labelledby="updates-faq-title" style={{ ...card, scrollMarginTop: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
+          <div>
+            <h3 id="updates-faq-title" style={{ fontSize: 15, fontWeight: 800, color: '#fafafa', margin: '0 0 4px' }}>
+              Travou em algum passo?
+            </h3>
+            <p style={{ color: '#a1a1aa', fontSize: 13, margin: 0 }}>
+              Respostas rápidas ou suporte direto no WhatsApp.
             </p>
           </div>
           <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer" style={{ ...buttonBase, background: 'linear-gradient(135deg,#10b981,#059669)', color: '#fff', textDecoration: 'none', border: '1px solid #10b981' }}>
-            <MessageCircle aria-hidden="true" size={16} />
+            <MessageCircle aria-hidden="true" size={15} />
             WhatsApp 71 99957-5358
           </a>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
           {[
             {
-              q: 'Cliquei em “Abrir extensões” e nada aconteceu',
-              a: 'A extensão precisa estar ativa para abrir a tela interna do Chrome. Use “Copiar endereço” e cole chrome://extensions na barra do navegador.',
+              q: 'O Chrome bloqueou a pasta Downloads/Documentos?',
+              a: 'Por segurança o Chrome bloqueia a raiz. Crie uma subpasta dentro dela (ex: FriendlyMiner) e selecione a subpasta.',
             },
             {
-              q: 'Não sei qual pasta substituir',
-              a: 'Abra chrome://extensions, procure a Friendly Miner e confira o caminho da extensão. Se não encontrar, siga a instalação do zero acima.',
+              q: 'Meus leads somem se eu apagar a extensão?',
+              a: 'Não! Tudo fica salvo na sua conta na nuvem (Supabase). Você pode reinstalar à vontade.',
             },
             {
-              q: 'Meus leads somem se eu remover a extensão?',
-              a: 'Não. Os leads ficam salvos no painel pelo Supabase. A extensão apenas minera e envia os dados.',
+              q: 'Qual navegador funciona melhor?',
+              a: 'Google Chrome ou Microsoft Edge no computador. O recurso de 1 clique funciona nativamente neles.',
             },
             {
-              q: 'Depois de atualizar ainda aparece a versão antiga',
-              a: 'Recarregue a extensão em chrome://extensions e clique em “Verificar novamente”. Se continuar, fale com o suporte.',
+              q: 'Prefere o método antigo (.ZIP)?',
+              a: 'Use o botão "Baixar .ZIP", extraia tudo e aponte o Chrome para a pasta que tem o arquivo manifest.json.',
             },
           ].map(item => (
-            <article key={item.q} style={{ background: '#09090b', border: '1px solid #3f3f46', padding: 14 }}>
-              <h4 style={{ color: '#fafafa', fontSize: 13, margin: '0 0 6px' }}>{item.q}</h4>
-              <p style={{ color: '#b4b4bd', fontSize: 12, lineHeight: 1.5, margin: 0 }}>{item.a}</p>
+            <article key={item.q} style={{ background: '#09090b', border: '1px solid #27272a', padding: 14 }}>
+              <h4 style={{ color: '#fafafa', fontSize: 13, margin: '0 0 5px' }}>{item.q}</h4>
+              <p style={{ color: '#a1a1aa', fontSize: 12, lineHeight: 1.5, margin: 0 }}>{item.a}</p>
             </article>
           ))}
         </div>
       </section>
 
-      <section aria-labelledby="version-history-title" style={card}>
-        <h3 id="version-history-title" style={{ fontSize: 15, fontWeight: 700, color: '#fafafa', margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <FileText aria-hidden="true" size={16} color="#34d399" />
-          Histórico de versões
-        </h3>
-        {history.length ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Histórico de versões compacto */}
+      {history.length > 0 && (
+        <section aria-labelledby="version-history-title" style={card}>
+          <h3 id="version-history-title" style={{ fontSize: 14, fontWeight: 700, color: '#fafafa', margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <FileText aria-hidden="true" size={15} color="#34d399" />
+            Histórico de versões
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {history.map((item, index) => (
-              <article key={`${item.version}-${index}`} style={{ background: '#09090b', border: '1px solid #3f3f46', padding: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-                  <div>
-                    <h4 style={{ color: '#fafafa', fontSize: 14, margin: 0 }}>{item.title || `Versão ${item.version}`}</h4>
-                    <div className="mono" style={{ color: '#a1a1aa', fontSize: 12, marginTop: 3 }}>v{item.version}</div>
+              <article key={`${item.version}-${index}`} style={{ background: '#09090b', border: '1px solid #27272a', padding: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <strong style={{ color: '#fafafa', fontSize: 13 }}>{item.title || `Versão ${item.version}`}</strong>
+                    <span className="mono" style={{ color: '#34d399', fontSize: 11 }}>v{item.version}</span>
                   </div>
-                  <time className="mono" dateTime={item.releasedAt} style={{ color: '#a1a1aa', fontSize: 12 }}>{formatDate(item.releasedAt)}</time>
+                  <time className="mono" dateTime={item.releasedAt} style={{ color: '#71717a', fontSize: 11 }}>{formatDate(item.releasedAt)}</time>
                 </div>
-                <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {(item.changes || []).map(change => <li key={change} style={{ color: '#b4b4bd', fontSize: 13, lineHeight: 1.45 }}>{change}</li>)}
+                <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {(item.changes || []).map(change => <li key={change} style={{ color: '#a1a1aa', fontSize: 12, lineHeight: 1.45 }}>{change}</li>)}
                 </ul>
               </article>
             ))}
           </div>
-        ) : (
-          <p style={{ color: '#b4b4bd', fontSize: 13, lineHeight: 1.55, margin: 0 }}>
-            O histórico não está disponível neste momento. Use “Verificar novamente” para tentar carregar o catálogo.
-          </p>
-        )}
-      </section>
+        </section>
+      )}
     </div>
   );
 }

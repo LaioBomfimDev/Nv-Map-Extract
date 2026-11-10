@@ -6,6 +6,10 @@
 // o refresh token permanece sob responsabilidade do site.
 // ============================================================================
 (function () {
+  if (typeof window.__fmBridgeCleanup === 'function') {
+    try { window.__fmBridgeCleanup(); } catch (_) {}
+  }
+
   const manifest = (chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest() : {};
   const extensionVersion = manifest.version || '';
   const extensionName = manifest.name || 'Friendly Miner Extractor';
@@ -22,9 +26,11 @@
       document.documentElement.setAttribute('data-fm-extension', '1');
       document.documentElement.setAttribute('data-fm-extension-version', extensionVersion);
       document.documentElement.setAttribute('data-fm-extension-name', extensionName);
+      document.documentElement.setAttribute('data-fm-extension-reload', '1');
       postToPage({
         action: 'status',
         installed: true,
+        supportsReload: true,
         version: extensionVersion,
         name: extensionName,
         requestId: typeof requestId === 'string' ? requestId : undefined,
@@ -41,7 +47,6 @@
         const raw = localStorage.getItem(key);
         if (!raw) continue;
         const parsed = JSON.parse(raw);
-        // v2 guarda a sessão direto; algumas versões embrulham em currentSession.
         const s = parsed.access_token ? parsed : (parsed.currentSession || null);
         if (s && s.access_token) return s;
       }
@@ -60,41 +65,57 @@
         action: 'fmAuth',
         data: {
           access_token: s.access_token,
-          expires_at: s.expires_at || 0,       // epoch em segundos
+          expires_at: s.expires_at || 0,
           email: (s.user && s.user.email) || '',
         },
       });
     } catch (_) {}
   }
 
-  // Envia ao carregar, ao focar a aba e periodicamente (o token é renovado
-  // pelo próprio site; relemos o valor atualizado).
+  function onVisibilityChange() {
+    if (!document.hidden) {
+      push();
+      publishStatus();
+    }
+  }
+
   push();
   publishStatus();
   window.addEventListener('focus', push);
   window.addEventListener('storage', push);
   window.addEventListener('focus', publishStatus);
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-      push();
-      publishStatus();
-    }
-  });
-  setInterval(push, 30 * 1000);
-  setInterval(publishStatus, 30 * 1000);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  const pushTimer = setInterval(push, 30 * 1000);
+  const statusTimer = setInterval(publishStatus, 30 * 1000);
 
-  // Marca presença da extensão para o site detectar (abas "Buscar Leads" e "Atualizações").
-  publishStatus();
-
-  // Recebe comandos do site (ex.: iniciar busca) e repassa ao service worker.
-  window.addEventListener('message', (event) => {
+  function onPageMessage(event) {
     if (event.source !== window || event.origin !== pageOrigin) return;
     const d = event.data;
     if (!d || d.__fm !== 'site') return;
+
     if (d.action === 'getExtensionStatus') {
       publishStatus(d.requestId);
       return;
     }
+
+    if (d.action === 'reloadExtension') {
+      const requestId = typeof d.requestId === 'string' ? d.requestId : '';
+      try {
+        chrome.runtime.sendMessage({ action: 'fmReloadExtension', requestId }, (response) => {
+          const runtimeError = chrome.runtime.lastError;
+          postToPage({
+            action: 'reloadExtensionAck',
+            requestId,
+            ok: !runtimeError && response?.ok === true,
+            error: runtimeError?.message || response?.error || '',
+          });
+        });
+      } catch (error) {
+        postToPage({ action: 'reloadExtensionAck', requestId, ok: false, error: error?.message || 'Falha ao recarregar.' });
+      }
+      return;
+    }
+
     if (d.action === 'openExtensionsPage') {
       const requestId = typeof d.requestId === 'string' ? d.requestId : '';
       try {
@@ -112,6 +133,7 @@
       }
       return;
     }
+
     if (d.action === 'startSearch' && d.query) {
       const requestId = typeof d.requestId === 'string' ? d.requestId : '';
       const jobId = typeof d.jobId === 'string' ? d.jobId : '';
@@ -146,11 +168,11 @@
         });
       }
     }
-  });
+  }
 
-  // O service worker retransmite o progresso da aba do Maps para este content
-  // script; daqui o evento chega à aplicação React por postMessage.
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  window.addEventListener('message', onPageMessage);
+
+  function onRuntimeMessage(message, _sender, sendResponse) {
     if (!message || !['fmSearchProgress', 'fmSearchDone'].includes(message.action)) return false;
     postToPage({
       action: message.action === 'fmSearchDone' ? 'searchDone' : 'searchProgress',
@@ -160,5 +182,18 @@
     });
     try { sendResponse({ ok: true }); } catch (_) {}
     return false;
-  });
+  }
+
+  chrome.runtime.onMessage.addListener(onRuntimeMessage);
+
+  window.__fmBridgeCleanup = () => {
+    clearInterval(pushTimer);
+    clearInterval(statusTimer);
+    window.removeEventListener('focus', push);
+    window.removeEventListener('storage', push);
+    window.removeEventListener('focus', publishStatus);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    window.removeEventListener('message', onPageMessage);
+    try { chrome.runtime.onMessage.removeListener(onRuntimeMessage); } catch (_) {}
+  };
 })();

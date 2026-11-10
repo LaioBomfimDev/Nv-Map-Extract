@@ -11,6 +11,7 @@ import {
 const ExtensionUpdateContext = createContext(null);
 const DETECTION_TIMEOUT_MS = 2200;
 const OPEN_EXTENSIONS_TIMEOUT_MS = 3500;
+const RELOAD_EXTENSION_TIMEOUT_MS = 3000;
 const FETCH_TIMEOUT_MS = 8000;
 
 function getPageOrigin() {
@@ -25,8 +26,10 @@ function getMetadataUrl() {
 function readExtensionMarker() {
   const root = document.documentElement;
   const installed = root.getAttribute('data-fm-extension') === '1';
+  const supportsReload = root.getAttribute('data-fm-extension-reload') === '1';
   return {
     installed,
+    supportsReload,
     version: installed ? (root.getAttribute('data-fm-extension-version') || '') : '',
     name: installed ? (root.getAttribute('data-fm-extension-name') || 'Friendly Miner Extractor') : '',
   };
@@ -37,7 +40,7 @@ export function ExtensionUpdateProvider({ children }) {
   const [metadataPhase, setMetadataPhase] = useState('checking');
   const [metadataError, setMetadataError] = useState('');
   const [metadataCachedAt, setMetadataCachedAt] = useState(null);
-  const [extension, setExtension] = useState({ installed: false, version: '', name: '' });
+  const [extension, setExtension] = useState({ installed: false, supportsReload: false, version: '', name: '' });
   const [extensionPhase, setExtensionPhase] = useState('checking');
   const [lastCheckedAt, setLastCheckedAt] = useState(null);
   const detectionTimerRef = useRef(null);
@@ -67,7 +70,7 @@ export function ExtensionUpdateProvider({ children }) {
       const latestMarker = readExtensionMarker();
       settleExtension(latestMarker.installed
         ? latestMarker
-        : { installed: false, version: '', name: '' });
+        : { installed: false, supportsReload: false, version: '', name: '' });
     }, DETECTION_TIMEOUT_MS);
   }, [settleExtension]);
 
@@ -149,6 +152,29 @@ export function ExtensionUpdateProvider({ children }) {
     window.postMessage({ __fm: 'site', action: 'openExtensionsPage', requestId }, getPageOrigin());
   }), []);
 
+  const reloadExtension = useCallback(() => new Promise((resolve) => {
+    const requestId = createRequestId('reload-extension');
+    const timeout = setTimeout(() => {
+      pendingRequestsRef.current.delete(requestId);
+      resolve({
+        ok: false,
+        reason: 'unsupported',
+        message: 'Esta versão ainda precisa recarregar manualmente em chrome://extensions.',
+      });
+    }, RELOAD_EXTENSION_TIMEOUT_MS);
+
+    pendingRequestsRef.current.set(requestId, (result) => {
+      clearTimeout(timeout);
+      if (result.ok) {
+        setTimeout(() => {
+          if (mountedRef.current) detectExtension();
+        }, 1200);
+      }
+      resolve(result);
+    });
+    window.postMessage({ __fm: 'site', action: 'reloadExtension', requestId }, getPageOrigin());
+  }), [detectExtension]);
+
   useEffect(() => {
     mountedRef.current = true;
     const pendingRequests = pendingRequestsRef.current;
@@ -161,6 +187,7 @@ export function ExtensionUpdateProvider({ children }) {
       if (data.action === 'status' && data.installed) {
         settleExtension({
           installed: true,
+          supportsReload: data.supportsReload === true || document.documentElement.getAttribute('data-fm-extension-reload') === '1',
           version: typeof data.version === 'string' ? data.version : '',
           name: typeof data.name === 'string' ? data.name : 'Friendly Miner Extractor',
         });
@@ -178,6 +205,20 @@ export function ExtensionUpdateProvider({ children }) {
             ? 'A página de extensões foi aberta em uma nova aba.'
             : (data.error || 'O Chrome não permitiu abrir a página de extensões.'),
         });
+        return;
+      }
+
+      if (data.action === 'reloadExtensionAck' && data.requestId) {
+        const settle = pendingRequestsRef.current.get(data.requestId);
+        if (!settle) return;
+        pendingRequestsRef.current.delete(data.requestId);
+        settle({
+          ok: data.ok === true,
+          reason: data.ok === true ? 'reloading' : 'extensionError',
+          message: data.ok === true
+            ? 'Recarregando extensão automaticamente…'
+            : (data.error || 'Não foi possível recarregar automaticamente.'),
+        });
       }
     }
 
@@ -185,10 +226,11 @@ export function ExtensionUpdateProvider({ children }) {
     detectExtension();
     loadMetadata();
 
-    function recheckWhenVisible() {
+    function recheckWhenActive() {
       if (!document.hidden) detectExtension();
     }
-    document.addEventListener('visibilitychange', recheckWhenVisible);
+    document.addEventListener('visibilitychange', recheckWhenActive);
+    window.addEventListener('focus', recheckWhenActive);
 
     return () => {
       mountedRef.current = false;
@@ -200,7 +242,8 @@ export function ExtensionUpdateProvider({ children }) {
       }));
       pendingRequests.clear();
       window.removeEventListener('message', onMessage);
-      document.removeEventListener('visibilitychange', recheckWhenVisible);
+      document.removeEventListener('visibilitychange', recheckWhenActive);
+      window.removeEventListener('focus', recheckWhenActive);
     };
   }, [detectExtension, loadMetadata, settleExtension]);
 
@@ -228,6 +271,7 @@ export function ExtensionUpdateProvider({ children }) {
     lastCheckedAt,
     checkNow,
     openExtensionsPage,
+    reloadExtension,
   }), [
     checkNow,
     extension,
@@ -237,6 +281,7 @@ export function ExtensionUpdateProvider({ children }) {
     metadataCachedAt,
     metadataError,
     openExtensionsPage,
+    reloadExtension,
     status,
   ]);
 

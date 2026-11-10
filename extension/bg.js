@@ -63,6 +63,27 @@ const FM_PANEL_URLS = [
     'http://127.0.0.1:3008/*',
 ];
 
+function reinjectPanelTabs() {
+    try {
+        chrome.tabs.query({ url: FM_PANEL_URLS }, (tabs) => {
+            if (chrome.runtime.lastError) return;
+            (tabs || []).forEach(tab => {
+                if (tab.id == null) return;
+                chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    files: ['authBridge.js'],
+                }).catch(() => {});
+            });
+        });
+    } catch (_) {}
+}
+
+try {
+    chrome.runtime.onInstalled.addListener(() => {
+        reinjectPanelTabs();
+    });
+} catch (_) {}
+
 function relaySearchEvent(action, data) {
     const payload = {
         ...(data && typeof data === 'object' ? data : {}),
@@ -137,6 +158,15 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
             storeActiveSearch();
         }
         try { sendResponse({ ok: true, jobId: doneData.jobId }); } catch (_) {}
+        return false;
+    }
+
+    // Recarrega a extensão automaticamente após atualização direta na pasta.
+    if (msg.action === 'fmReloadExtension') {
+        try { sendResponse({ ok: true }); } catch (_) {}
+        setTimeout(() => {
+            try { chrome.runtime.reload(); } catch (_) {}
+        }, 150);
         return false;
     }
 

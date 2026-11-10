@@ -3,6 +3,11 @@ import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useExtensionUpdates } from '../providers/ExtensionUpdateProvider';
 import {
+  canDirectFolderInstall,
+  installOrUpdateExtensionInFolder,
+} from '../utils/extensionInstaller';
+import ChromeGuideMockup from './ChromeGuideMockup';
+import {
   ArrowRight,
   Check,
   Download,
@@ -35,7 +40,7 @@ const HERO_MODES = [
     id: 'maps',
     label: 'Extensão no Maps',
     image: '/media/screen-extensao.png',
-    urlLabel: 'google.com/maps · Extractor v2.1.1',
+    urlLabel: 'google.com/maps · Extractor v2.1.2',
     tag: 'PRINT REAL',
     alt: 'Extensão Friendly Miner extraindo leads diretamente no Google Maps',
   },
@@ -122,16 +127,18 @@ async function copyTextWithFallback(text) {
 export default function LandingPage({ onOpenLogin }) {
   const rootRef = useRef(null);
   const progressRef = useRef(null);
-  const { extension, latest, openExtensionsPage } = useExtensionUpdates();
+  const { extension, latest, hasUpdate, openExtensionsPage, reloadExtension } = useExtensionUpdates();
 
   const [heroModeIndex, setHeroModeIndex] = useState(0);
   const [activeFeature, setActiveFeature] = useState(0);
-  const [downloadedNotice, setDownloadedNotice] = useState(false);
+  const [installFeedback, setInstallFeedback] = useState(null); // { ok, text }
+  const [installing, setInstalling] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState('');
   const [zoomMedia, setZoomMedia] = useState(null);
 
-  const version = latest?.version || '2.1.1';
-  const downloadUrl = latest?.downloadUrl || '/downloads/friendly-miner-2.1.1.zip';
+  const version = latest?.version || '2.1.2';
+  const downloadUrl = latest?.downloadUrl || '/downloads/friendly-miner-2.1.2.zip';
+  const directSupported = canDirectFolderInstall();
   const currentHero = HERO_MODES[heroModeIndex];
   const currentFeature = FEATURES[activeFeature];
 
@@ -210,11 +217,73 @@ export default function LandingPage({ onOpenLogin }) {
     };
   }, [zoomMedia]);
 
-  function handleDownloadClick() {
-    setDownloadedNotice(true);
+  function handleZipDownloadClick() {
+    setInstallFeedback({
+      ok: true,
+      text: `ZIP v${version} baixado! Extraia em uma pasta e carregue em chrome://extensions.`,
+    });
     const el = document.getElementById('como-instalar');
     if (el) {
-      setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 450);
+      setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 400);
+    }
+  }
+
+  async function handleDirectAction() {
+    if (!directSupported || installing) return;
+    setInstalling(true);
+    setInstallFeedback({ ok: true, text: 'Escolha ou crie uma subpasta (ex: FriendlyMiner)…' });
+
+    try {
+      const result = await installOrUpdateExtensionInFolder({
+        downloadUrl,
+        expectedSha256: latest?.sha256 || '',
+        onStep: (step) => {
+          const map = {
+            picking: 'Escolha ou crie uma subpasta (ex: FriendlyMiner)…',
+            downloading: 'Baixando extensão oficial…',
+            unzipping: 'Validando SHA-256 e extraindo…',
+            writing: 'Preparando pasta da extensão…',
+          };
+          setInstallFeedback({ ok: true, text: map[step] || 'Processando…' });
+        },
+      });
+
+      if (result.cancelled) {
+        setInstallFeedback(null);
+        return;
+      }
+
+      if (extension?.installed) {
+        if (extension.supportsReload && reloadExtension) {
+          const reloadRes = await reloadExtension();
+          if (reloadRes.ok) {
+            setInstallFeedback({
+              ok: true,
+              text: `Extensão atualizada em "${result.folderName}" e recarregada automaticamente!`,
+            });
+            return;
+          }
+        }
+        setInstallFeedback({
+          ok: true,
+          text: `Arquivos atualizados em "${result.folderName}"! Clique no ícone ↻ Recarregar no Chrome.`,
+        });
+        if (openExtensionsPage) await openExtensionsPage().catch(() => {});
+      } else {
+        setInstallFeedback({
+          ok: true,
+          text: `Pasta "${result.folderName}" pronta (${result.fileCount} arquivos)! Agora carregue ela no Chrome logo abaixo.`,
+        });
+        const el = document.getElementById('como-instalar');
+        if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 350);
+      }
+    } catch (err) {
+      setInstallFeedback({
+        ok: false,
+        text: err?.message || 'Erro ao preparar pasta. Use o download .ZIP.',
+      });
+    } finally {
+      setInstalling(false);
     }
   }
 
@@ -227,6 +296,14 @@ export default function LandingPage({ onOpenLogin }) {
     setCopyFeedback(copied ? 'copied' : 'manual');
     setTimeout(() => setCopyFeedback(''), 3600);
   }
+
+  const primaryLabel = installing
+    ? 'Preparando pasta…'
+    : extension?.installed && hasUpdate
+      ? `Atualizar para v${version} (1 Clique)`
+      : directSupported
+        ? `Instalar em 1 Clique (v${version})`
+        : `Baixar Extensão Grátis (v${version})`;
 
   return (
     <div className="fm-lp" ref={rootRef}>
@@ -246,22 +323,24 @@ export default function LandingPage({ onOpenLogin }) {
           <nav className="fm-lp-nav-links" aria-label="Navegação principal">
             <a href="#na-pratica" className="fm-lp-nav-link">Na prática</a>
             <a href="#recursos" className="fm-lp-nav-link">Recursos</a>
-            <a href="#como-instalar" className="fm-lp-nav-link">Como instalar</a>
+            <a href="#como-instalar" className="fm-lp-nav-link">Instalar fácil</a>
           </nav>
 
           <div className="fm-lp-nav-actions">
             <button type="button" onClick={onOpenLogin} className="fm-btn fm-btn-outline">
               Entrar no Painel
             </button>
-            <a
-              href={downloadUrl}
-              download
-              onClick={handleDownloadClick}
-              className="fm-btn fm-btn-primary"
-            >
-              <Download size={14} />
-              Baixar Extensão
-            </a>
+            {directSupported ? (
+              <button type="button" onClick={handleDirectAction} disabled={installing} className="fm-btn fm-btn-primary">
+                <Zap size={14} />
+                {extension?.installed && hasUpdate ? 'Atualizar (1 Clique)' : 'Instalar (1 Clique)'}
+              </button>
+            ) : (
+              <a href={downloadUrl} download onClick={handleZipDownloadClick} className="fm-btn fm-btn-primary">
+                <Download size={14} />
+                Baixar Extensão
+              </a>
+            )}
           </div>
         </div>
       </header>
@@ -273,7 +352,11 @@ export default function LandingPage({ onOpenLogin }) {
             <div className="fm-lp-pill fm-hero-anim">
               <span className="fm-lp-pill-dot" />
               {extension?.installed ? (
-                <span>Extensão v{extension.version || version} ativa no seu Chrome</span>
+                <span>
+                  {hasUpdate
+                    ? `Extensão v${extension.version} detectada · Atualização v${version} disponível`
+                    : `Extensão v${extension.version || version} ativa e pronta no seu Chrome`}
+                </span>
               ) : (
                 <span>EXTENSÃO CHROME v{version} · PAINEL + MAPA IBGE</span>
               )}
@@ -288,15 +371,33 @@ export default function LandingPage({ onOpenLogin }) {
             </p>
 
             <div className="fm-lp-cta-row fm-hero-anim">
-              <a
-                href={downloadUrl}
-                download
-                onClick={handleDownloadClick}
-                className="fm-btn fm-btn-lg fm-btn-emerald"
-              >
-                <Download size={16} />
-                Baixar Extensão Grátis (30 KB)
-              </a>
+              {directSupported && !(extension?.installed && !hasUpdate) ? (
+                <button
+                  type="button"
+                  onClick={handleDirectAction}
+                  disabled={installing}
+                  className="fm-btn fm-btn-lg fm-btn-emerald"
+                >
+                  <Zap size={16} />
+                  {primaryLabel}
+                </button>
+              ) : extension?.installed && !hasUpdate ? (
+                <button type="button" onClick={onOpenLogin} className="fm-btn fm-btn-lg fm-btn-emerald">
+                  <Rocket size={16} />
+                  Abrir Painel Agora
+                </button>
+              ) : (
+                <a
+                  href={downloadUrl}
+                  download
+                  onClick={handleZipDownloadClick}
+                  className="fm-btn fm-btn-lg fm-btn-emerald"
+                >
+                  <Download size={16} />
+                  Baixar Extensão Grátis (31 KB)
+                </a>
+              )}
+
               <button type="button" onClick={onOpenLogin} className="fm-btn fm-btn-lg fm-btn-outline">
                 <Rocket size={16} />
                 Já tenho conta · Entrar
@@ -304,19 +405,37 @@ export default function LandingPage({ onOpenLogin }) {
             </div>
 
             <div className="fm-lp-micro-proof fm-hero-anim">
-              <span>✓ Sem API paga do Google</span>
-              <span>✓ Extração ilimitada no seu navegador</span>
+              <span>✓ Sem WinRAR na instalação</span>
+              <span>✓ Atualização com 1 clique</span>
               <span>✓ CRM + Mapa IBGE inclusos</span>
+              {directSupported && (
+                <a
+                  href={downloadUrl}
+                  download
+                  onClick={handleZipDownloadClick}
+                  style={{ color: '#a1a1aa', textDecoration: 'underline', textUnderlineOffset: 3 }}
+                >
+                  Baixar .ZIP manual
+                </a>
+              )}
             </div>
 
-            {downloadedNotice && (
-              <div className="fm-lp-download-toast" role="status">
-                <span>
-                  Download iniciado! Agora siga os <strong>3 passos abaixo</strong> para ativar no Chrome em 45 segundos.
-                </span>
-                <a href="#como-instalar" style={{ color: '#34d399', fontWeight: 700, textDecoration: 'none' }}>
-                  Ver tutorial ↓
-                </a>
+            {installFeedback && (
+              <div
+                className="fm-lp-status-banner"
+                role="status"
+                style={{
+                  background: installFeedback.ok ? 'rgba(16, 185, 129, 0.09)' : 'rgba(239, 68, 68, 0.1)',
+                  border: `1px solid ${installFeedback.ok ? 'rgba(16, 185, 129, 0.38)' : 'rgba(239, 68, 68, 0.38)'}`,
+                  color: installFeedback.ok ? '#a7f3d0' : '#fecaca',
+                }}
+              >
+                <span>{installFeedback.text}</span>
+                {installFeedback.ok && (
+                  <a href="#como-instalar" style={{ color: '#34d399', fontWeight: 700, textDecoration: 'none' }}>
+                    Ver guia ↓
+                  </a>
+                )}
               </div>
             )}
 
@@ -449,61 +568,63 @@ export default function LandingPage({ onOpenLogin }) {
           </div>
         </section>
 
-        {/* Tutorialzinho rápido de instalação */}
+        {/* Tutorial visual simplificado (2 passos + simulação fiel do Chrome) */}
         <section id="como-instalar" className="fm-lp-section">
           <div className="fm-lp-container">
             <div className="fm-lp-section-head fm-scroll-reveal">
               <div>
-                <div className="fm-lp-kicker">INSTALAÇÃO EM 45 SEGUNDOS</div>
-                <h2 className="fm-lp-h2">Fácil de baixar. Zero burocracia.</h2>
+                <div className="fm-lp-kicker">INSTALAÇÃO & ATUALIZAÇÃO SEM SOFRIMENTO</div>
+                <h2 className="fm-lp-h2">2 cliques na pasta. Pronto.</h2>
               </div>
               <p className="fm-lp-lead">
-                Enquanto não subimos na Chrome Web Store, você ativa direto no Chrome em 3 cliques — leve (30 KB), seguro e sem perder suas buscas.
+                Sem precisar de WinRAR nem ficar procurando arquivos. O próprio navegador prepara a pasta para você carregar no Chrome — e as próximas atualizações recarregam sozinhas.
               </p>
             </div>
 
             <div className="fm-steps-grid">
               <div className="fm-step-card fm-step-anim">
                 <span className="fm-step-badge">01</span>
-                <h3>Baixe e extraia a pasta</h3>
+                <h3>Prepare a pasta em 1 clique</h3>
                 <p>
-                  Clique em <strong>Baixar Extensão</strong>, abra o arquivo{' '}
-                  <span className="fm-code-pill">friendly-miner-{version}.zip</span> e clique em{' '}
-                  <strong>Extrair tudo</strong> para uma pasta fixa (ex: Documentos).
+                  Clique em <strong>Instalar em 1 Clique</strong> e crie ou selecione uma subpasta (ex:{' '}
+                  <span className="fm-code-pill">FriendlyMiner</span> dentro de Documentos). Os arquivos já caem prontos dentro dela, validados.
                 </p>
               </div>
 
               <div className="fm-step-card fm-step-anim">
                 <span className="fm-step-badge">02</span>
-                <h3>Carregue no Chrome</h3>
+                <h3>Carregue no Chrome e entre</h3>
                 <p>
-                  Cole <span className="fm-code-pill">chrome://extensions</span> na barra do navegador, ligue o{' '}
-                  <strong>Modo do desenvolvedor</strong> no topo direito e clique em{' '}
-                  <strong>Carregar sem compactação</strong> escolhendo a pasta extraída.
-                </p>
-              </div>
-
-              <div className="fm-step-card fm-step-anim">
-                <span className="fm-step-badge">03</span>
-                <h3>Conecte e vá pra caça</h3>
-                <p>
-                  Entre com o Google aqui no painel, abra o Google Maps, busque seu nicho + cidade e clique em{' '}
-                  <strong>Iniciar Extração</strong>. Os leads sobem direto pro seu CRM.
+                  Cole <span className="fm-code-pill">chrome://extensions</span>, ligue{' '}
+                  <strong>Modo do desenvolvedor</strong> e arraste a pasta (ou clique em{' '}
+                  <strong>Carregar sem compactação</strong>). Depois é só entrar no painel com o Google.
                 </p>
               </div>
             </div>
 
+            <div className="fm-lp-mockup-wrap fm-scroll-reveal">
+              <ChromeGuideMockup mode={extension?.installed ? 'update' : 'install'} />
+            </div>
+
             <div className="fm-tutorial-toolbar fm-scroll-reveal">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <a
-                  href={downloadUrl}
-                  download
-                  onClick={handleDownloadClick}
-                  className="fm-btn fm-btn-primary"
-                >
-                  <Download size={14} />
-                  Baixar ZIP v{version}
-                </a>
+                {directSupported ? (
+                  <button
+                    type="button"
+                    onClick={handleDirectAction}
+                    disabled={installing}
+                    className="fm-btn fm-btn-primary"
+                  >
+                    <Zap size={14} />
+                    {extension?.installed ? `Atualizar pasta (v${version})` : `Preparar pasta (v${version})`}
+                  </button>
+                ) : (
+                  <a href={downloadUrl} download onClick={handleZipDownloadClick} className="fm-btn fm-btn-primary">
+                    <Download size={14} />
+                    Baixar ZIP v{version}
+                  </a>
+                )}
+
                 <button type="button" onClick={handleOpenExtensions} className="fm-btn fm-btn-outline">
                   {copyFeedback === 'copied' ? <Check size={14} color="#10b981" /> : <Zap size={14} />}
                   {copyFeedback === 'copied'
@@ -512,6 +633,7 @@ export default function LandingPage({ onOpenLogin }) {
                       ? 'Digite chrome://extensions na barra'
                       : (extension?.installed ? 'Abrir chrome://extensions' : 'Copiar chrome://extensions')}
                 </button>
+
                 <button type="button" onClick={onOpenLogin} className="fm-btn fm-btn-outline">
                   <Target size={14} />
                   Entrar no Painel
@@ -544,15 +666,17 @@ export default function LandingPage({ onOpenLogin }) {
               Instale a extensão em menos de 1 minuto e tenha hoje sua primeira lista real de empresas prontas para abordagem.
             </p>
             <div className="fm-lp-cta-row">
-              <a
-                href={downloadUrl}
-                download
-                onClick={handleDownloadClick}
-                className="fm-btn fm-btn-lg fm-btn-emerald"
-              >
-                <Download size={16} />
-                Baixar Extensão Agora
-              </a>
+              {directSupported ? (
+                <button type="button" onClick={handleDirectAction} disabled={installing} className="fm-btn fm-btn-lg fm-btn-emerald">
+                  <Zap size={16} />
+                  {primaryLabel}
+                </button>
+              ) : (
+                <a href={downloadUrl} download onClick={handleZipDownloadClick} className="fm-btn fm-btn-lg fm-btn-emerald">
+                  <Download size={16} />
+                  Baixar Extensão Agora
+                </a>
+              )}
               <button type="button" onClick={onOpenLogin} className="fm-btn fm-btn-lg fm-btn-primary">
                 Acessar Painel
                 <ArrowRight size={15} />
