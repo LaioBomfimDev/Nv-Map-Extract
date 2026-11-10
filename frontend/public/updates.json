@@ -1,18 +1,28 @@
 {
   "schemaVersion": 1,
   "latest": {
-    "version": "2.1.0",
+    "version": "2.1.1",
     "minimumSupportedVersion": "2.0.0",
     "minimumChromeVersion": "102",
     "channel": "stable",
-    "title": "Central de atualizações e mineração rastreável",
-    "releasedAt": "2026-07-11",
-    "downloadUrl": "/downloads/friendly-miner-2.1.0.zip",
-    "sha256": "6fe50c3b95bc54e0739b222e3cdd8bc47d36b7269c4d84c2f55b4ad0121c557f",
-    "sizeBytes": 34737,
-    "notes": "Atualização recomendada para melhorar a comunicação entre o painel e a extensão."
+    "title": "Fluxo direto para o Dashboard Oficial",
+    "releasedAt": "2026-11-10",
+    "downloadUrl": "/downloads/friendly-miner-2.1.1.zip",
+    "sha256": "2e1c4ec8ba5f148ccf5fd753b9e75610b0b0d35229e657d57fa150f2c5493955",
+    "sizeBytes": 31311,
+    "notes": "Download direto de CSV no Maps, acesso em 1 clique ao Dashboard Oficial e remoção da página legada."
   },
   "history": [
+    {
+      "version": "2.1.1",
+      "title": "Fluxo direto para o Dashboard Oficial",
+      "releasedAt": "2026-11-10",
+      "changes": [
+        "Remoção do dashboard.html legado de dentro da extensão.",
+        "Exportação CSV direta no painel flutuante do Google Maps.",
+        "Botão direto para abrir o Dashboard Oficial em 1 clique."
+      ]
+    },
     {
       "version": "2.1.0",
       "title": "Atualizações confiáveis e comunicação confirmada",

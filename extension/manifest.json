@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Friendly Miner Extractor",
-    "version": "2.1.0",
+    "version": "2.1.1",
     "minimum_chrome_version": "102",
     "description": "O seu companheiro amigável para minerar leads do Google Maps e enviar diretamente para o seu dashboard.",
     "icons": {
@@ -100,7 +100,7 @@
         "service_worker": "bg.js"
     },
     "web_accessible_resources": [{
-        "resources": ["dashboard.html", "injected.js", "css/*"],
+        "resources": ["injected.js", "css/*"],
         "matches":   ["<all_urls>"]
     }],
     "permissions": ["storage", "scripting"],

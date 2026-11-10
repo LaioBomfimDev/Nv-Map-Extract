@@ -1,5 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import SearchList from './components/SearchList';
+import LandingPage from './components/LandingPage';
 import LoginScreen from './components/LoginScreen';
 import ImportWizard from './components/ImportWizard';
 import { api } from './api';
@@ -67,6 +68,7 @@ export default function App() {
   const [uploading, setUploading]   = useState(false);
   const [uploadMsg, setUploadMsg]   = useState('');
   const [importOpen, setImportOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('login') === '1');
   const [dismissedUpdate, setDismissedUpdate] = useState(() => {
     try { return window.localStorage.getItem('fm-dismissed-update') || ''; } catch (_) { return ''; }
   });
@@ -86,13 +88,25 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  // A aba faz parte da URL para sobreviver a recargas e permitir links diretos.
+  // A aba faz parte da URL apenas quando autenticado, removendo ?login=1 ao entrar.
   useEffect(() => {
+    if (!session) return;
+    setLoginOpen(false);
     const url = new URL(window.location.href);
+    url.searchParams.delete('login');
     if (tab === 'dashboard') url.searchParams.delete('tab');
     else url.searchParams.set('tab', tab);
     window.history.replaceState({ tab }, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [tab]);
+  }, [tab, session]);
+
+  function closeLoginModal() {
+    setLoginOpen(false);
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('login')) {
+      url.searchParams.delete('login');
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+  }
 
   useEffect(() => {
     const onPopState = () => setTab(initialTab());
@@ -110,6 +124,7 @@ export default function App() {
     await supabase.auth.signOut();
     setSelectedSearch(null);
     setTab('dashboard');
+    setLoginOpen(false);
   }
 
   async function handleWizardImport(leads, metadata) {
@@ -139,7 +154,14 @@ export default function App() {
       </div>
     );
   }
-  if (!session) return <LoginScreen />;
+  if (!session) {
+    return (
+      <>
+        <LandingPage onOpenLogin={() => setLoginOpen(true)} />
+        {loginOpen && <LoginScreen onClose={closeLoginModal} />}
+      </>
+    );
+  }
 
   const userEmail = session.user?.email || '';
   const showUpdateBanner = hasUpdate && (isBlocking || dismissedUpdate !== latest?.version);

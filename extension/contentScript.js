@@ -47,7 +47,7 @@ function reportMiningProgress(stage, extra) {
         <div class="mse_logo">
             <span class="mse_logo_icon">🗺️</span>
             <div>
-                <div class="mse_logo_title">Maps Search</div>
+                <div class="mse_logo_title">Friendly Miner</div>
                 <div class="mse_logo_sub">Extractor</div>
             </div>
         </div>
@@ -70,6 +70,11 @@ function reportMiningProgress(stage, extra) {
     btnExport.id = 'mse_export_btn';
     btnExport.innerHTML = '⬇️ Exportar CSV';
 
+    const btnOpenPanel = document.createElement('button');
+    btnOpenPanel.className = 'mse_btn mse_btn_panel';
+    btnOpenPanel.id = 'mse_panel_btn';
+    btnOpenPanel.innerHTML = '🌐 Abrir Painel Oficial';
+
     const btnClear = document.createElement('button');
     btnClear.className = 'mse_btn mse_btn_clear';
     btnClear.id = 'mse_clear_btn';
@@ -84,6 +89,7 @@ function reportMiningProgress(stage, extra) {
     container.appendChild(btnStart);
     container.appendChild(btnSend);
     container.appendChild(btnExport);
+    container.appendChild(btnOpenPanel);
     container.appendChild(btnClear);
     container.appendChild(statusEl);
 
@@ -265,13 +271,42 @@ function reportMiningProgress(stage, extra) {
         });
     }
 
-    // EXPORTAR CSV
+    // EXPORTAR CSV DIRETO (sem passar por dashboard.html legado)
     btnExport.addEventListener('click', () => {
         if (leads.length === 0) {
             setStatus('⚠️ Nenhum lead para exportar.', 'warning');
             return;
         }
-        chrome.runtime.sendMessage({ action: 'openPage', data: leads });
+        const baseKeys = ['name', 'phone', 'email', 'website', 'address', 'category', 'averageRating', 'reviewCount', 'instagram', 'facebook', 'linkedin', 'twitter', 'youtube', 'placeID', 'cID', 'latitude', 'longitude'];
+        const extraKeys = [];
+        const seenKeys = new Set(baseKeys);
+        for (const lead of leads) {
+            for (const k of Object.keys(lead)) {
+                if (!seenKeys.has(k)) {
+                    seenKeys.add(k);
+                    extraKeys.push(k);
+                }
+            }
+        }
+        const keys = [...baseKeys.filter(k => leads.some(l => k in l)), ...extraKeys];
+        const header = keys.join(',');
+        const rows = leads.map(r => keys.map(k => `"${String(r[k] ?? '').replace(/"/g, '""')}"`).join(','));
+        const csv = [header, ...rows].join('\n');
+        const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `leads_maps_${Date.now()}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setStatus(`✅ CSV com ${leads.length} leads baixado.`, 'success');
+    });
+
+    // ABRIR PAINEL OFICIAL
+    btnOpenPanel.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ action: 'openDashboard' });
     });
 
     // LIMPAR

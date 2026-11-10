@@ -18,7 +18,6 @@ const REQUIRED_FILES = [
   'bg.js',
   'contentScript.js',
   'contentScript2.js',
-  'dashboard.html',
   'injected.js',
   'manifest.json',
   'popup.html',
@@ -28,7 +27,6 @@ const REQUIRED_FILES = [
   'icons/icon32.png',
   'icons/icon48.png',
   'icons/icon128.png',
-  'js/dashboard.js',
   'js/emailExtractor.js',
   'js/popup.js',
 ];
@@ -40,6 +38,14 @@ const crcTable = Array.from({ length: 256 }, (_, index) => {
   }
   return value >>> 0;
 });
+
+const TEXT_EXTENSION_RE = /\.(?:js|json|html|css)$/i;
+
+async function readExtensionAsset(relativePath) {
+  const raw = await readFile(path.join(EXTENSION_DIR, relativePath));
+  if (!TEXT_EXTENSION_RE.test(relativePath)) return raw;
+  return Buffer.from(raw.toString('utf8').replace(/\r\n/g, '\n'), 'utf8');
+}
 
 function fail(message) {
   throw new Error(`[release-extension] ${message}`);
@@ -256,7 +262,7 @@ async function validateRelease(manifest, feed, archivePath) {
     fail('O ZIP contém arquivos extras ou não contém todos os arquivos permitidos.');
   }
   for (const relativePath of REQUIRED_FILES) {
-    const source = await readFile(path.join(EXTENSION_DIR, relativePath));
+    const source = await readExtensionAsset(relativePath);
     if (!source.equals(entries.get(relativePath))) fail(`O ZIP está desatualizado em relação a extension/${relativePath}.`);
   }
   const archivedManifest = JSON.parse(entries.get('manifest.json').toString('utf8'));
@@ -277,7 +283,7 @@ const archivePath = path.join(ROOT, 'frontend', 'public', expectedDownload);
 if (!validateOnly) {
   await assertArchiveInputs();
   const config = await resolvePublicConfig();
-  const files = await Promise.all(REQUIRED_FILES.map(async name => ({ name, data: await readFile(path.join(EXTENSION_DIR, name)) })));
+  const files = await Promise.all(REQUIRED_FILES.map(async name => ({ name, data: await readExtensionAsset(name) })));
   files.push({ name: 'config.js', data: makeConfigFile(config) });
 
   const releaseDate = new Date(`${feed.latest.releasedAt || '2026-01-01'}T00:00:00Z`);

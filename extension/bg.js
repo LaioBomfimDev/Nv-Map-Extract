@@ -177,11 +177,25 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         return false;
     }
 
-    // Abrir página de resultados no dashboard interno da extensão
-    if (msg.action === 'openPage') {
-        chrome.storage.local.set({ leads: msg.data }, () => {
-            chrome.tabs.create({ url: 'dashboard.html' });
-        });
+    // Abrir ou focar diretamente o Dashboard oficial (Vercel) — fluxo sem dashboard.html legado
+    if (msg.action === 'openDashboard' || msg.action === 'openPage') {
+        (async () => {
+            const baseUrl = ((typeof FM_CONFIG !== 'undefined' && FM_CONFIG.APP_URL)
+                ? FM_CONFIG.APP_URL
+                : 'https://nv-map-extract.vercel.app').replace(/\/$/, '');
+            const token = await getValidToken();
+            const targetUrl = token ? baseUrl : `${baseUrl}/?login=1`;
+
+            chrome.tabs.query({ url: [`${baseUrl}/*`] }, (tabs) => {
+                if (!chrome.runtime.lastError && tabs && tabs.length > 0) {
+                    const tab = tabs[0];
+                    chrome.tabs.update(tab.id, { active: true });
+                    if (tab.windowId != null) chrome.windows.update(tab.windowId, { focused: true });
+                    return;
+                }
+                chrome.tabs.create({ url: targetUrl });
+            });
+        })();
         return false;
     }
 
@@ -205,6 +219,11 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
                     body: JSON.stringify({ p_keyword: keyword || '', p_city: city || '', p_leads: leads }),
                 });
                 if (!response.ok) {
+                    if (response.status === 401) {
+                        chrome.storage.local.remove('fmAuth');
+                        sendResponse({ success: false, message: 'Sessão expirada. Clique em "Abrir Painel Oficial" para entrar novamente.' });
+                        return;
+                    }
                     const t = await response.text();
                     sendResponse({ success: false, message: `Erro ${response.status}: ${t.slice(0, 140)}` });
                     return;
