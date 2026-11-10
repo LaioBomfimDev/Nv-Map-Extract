@@ -193,6 +193,7 @@ function UpdatesTabContent({ updateState }) {
   const [copyState, setCopyState] = useState('idle');
   const [openState, setOpenState] = useState('idle');
   const [directPhase, setDirectPhase] = useState('idle'); // idle | working | done_install | done_reload_auto | done_reload_manual | error
+  const [lastSavedFolder, setLastSavedFolder] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [actionIsError, setActionIsError] = useState(false);
 
@@ -265,7 +266,17 @@ function UpdatesTabContent({ updateState }) {
         return;
       }
 
+      setLastSavedFolder(result.folderName || '');
+
       if (extension.installed) {
+        if (!result.hadPreviousManifest) {
+          setDirectPhase('done_reload_manual');
+          setActionIsError(false);
+          setActionMessage(`Pasta "${result.folderName}" preparada com v${latest.version}, mas ela não tinha a versão anterior. Em chrome://extensions, remova a antiga (v${extension.version}) e carregue "${result.folderName}".`);
+          if (openExtensionsPage) await openExtensionsPage().catch(() => {});
+          return;
+        }
+
         setActionMessage(STEP_LABELS.reloading);
         const reloadRes = extension.supportsReload && reloadExtension
           ? await reloadExtension()
@@ -274,11 +285,11 @@ function UpdatesTabContent({ updateState }) {
         if (reloadRes.ok) {
           setDirectPhase('done_reload_auto');
           setActionIsError(false);
-          setActionMessage(`Extensão v${latest.version} gravada em "${result.folderName}" e recarregada automaticamente!`);
+          setActionMessage(`Extensão v${latest.version} gravada em "${result.folderName}" e recarregada!`);
         } else {
           setDirectPhase('done_reload_manual');
           setActionIsError(false);
-          setActionMessage(`Arquivos gravados em "${result.folderName}"! Agora clique em "Abrir extensões" e aperte ↻ Recarregar (a partir da v2.1.2 recarrega sozinho).`);
+          setActionMessage(`v${latest.version} gravada em "${result.folderName}"! Agora aperte ↻ Recarregar em chrome://extensions. Se continuar em v${extension.version}, o Chrome está carregado de outra pasta — veja em "Saiba mais" no Chrome ou remova a antiga e carregue "${result.folderName}".`);
           if (openExtensionsPage) await openExtensionsPage().catch(() => {});
         }
       } else {
@@ -420,12 +431,16 @@ function UpdatesTabContent({ updateState }) {
           </button>
         </div>
 
+        <p style={{ color: '#a1a1aa', fontSize: 12, margin: '12px 0 0', lineHeight: 1.5 }}>
+          No seletor de pastas do Windows só aparecem as subpastas (<span className="mono">js, icons, css</span>) — é normal; basta clicar em <strong>Selecionar pasta</strong>.
+        </p>
+
         {actionMessage && (
           <div
             role="status"
             aria-live="polite"
             style={{
-              marginTop: 14,
+              marginTop: 12,
               padding: '11px 14px',
               background: actionIsError ? 'rgba(239,68,68,0.12)' : 'rgba(16,185,129,0.12)',
               border: `1px solid ${actionIsError ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'}`,
@@ -435,6 +450,13 @@ function UpdatesTabContent({ updateState }) {
             }}
           >
             {actionMessage}
+          </div>
+        )}
+
+        {lastSavedFolder && needsUpdate && directPhase !== 'working' && (
+          <div style={{ marginTop: 10, padding: '11px 14px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.38)', color: '#fde68a', fontSize: 12, lineHeight: 1.55 }}>
+            <strong>Ainda mostra v{extension.version}?</strong> Isso acontece quando o Chrome carregou a extensão antiga de <strong>outra pasta</strong>.
+            Em <span className="mono">chrome://extensions</span>, clique em <strong>Saiba mais</strong> para ver a pasta antiga — ou simplesmente clique em <strong>Remover</strong> nela e carregue a pasta <span className="mono">{lastSavedFolder}</span>.
           </div>
         )}
       </div>

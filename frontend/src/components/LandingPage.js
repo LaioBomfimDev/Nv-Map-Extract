@@ -254,6 +254,14 @@ export default function LandingPage({ onOpenLogin }) {
       }
 
       if (extension?.installed) {
+        if (!result.hadPreviousManifest) {
+          setInstallFeedback({
+            ok: true,
+            text: `v${version} gravada em "${result.folderName}", mas essa pasta não tinha a versão antiga! Remova a antiga (v${extension.version}) em chrome://extensions e carregue "${result.folderName}".`,
+          });
+          if (openExtensionsPage) await openExtensionsPage().catch(() => {});
+          return;
+        }
         if (extension.supportsReload && reloadExtension) {
           const reloadRes = await reloadExtension();
           if (reloadRes.ok) {
@@ -266,7 +274,7 @@ export default function LandingPage({ onOpenLogin }) {
         }
         setInstallFeedback({
           ok: true,
-          text: `Arquivos atualizados em "${result.folderName}"! Clique no ícone ↻ Recarregar no Chrome.`,
+          text: `v${version} gravada em "${result.folderName}"! Aperte ↻ Recarregar no Chrome (se seguir em v${extension.version}, veja "Saiba mais" no Chrome para achar a pasta antiga).`,
         });
         if (openExtensionsPage) await openExtensionsPage().catch(() => {});
       } else {

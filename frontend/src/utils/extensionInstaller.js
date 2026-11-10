@@ -161,6 +161,14 @@ export async function installOrUpdateExtensionInFolder({ downloadUrl, expectedSh
     throw new Error(err?.message || 'Não foi possível acessar a pasta selecionada.');
   }
 
+  let hadPreviousManifest = false;
+  try {
+    await dirHandle.getFileHandle('manifest.json', { create: false });
+    hadPreviousManifest = true;
+  } catch (_) {
+    hadPreviousManifest = false;
+  }
+
   onStep?.('downloading');
   const sep = downloadUrl.includes('?') ? '&' : '?';
   const response = await fetch(`${downloadUrl}${sep}ts=${Date.now()}`, { cache: 'no-store' });
@@ -190,5 +198,6 @@ export async function installOrUpdateExtensionInFolder({ downloadUrl, expectedSh
     cancelled: false,
     folderName: dirHandle.name,
     fileCount: entries.length,
+    hadPreviousManifest,
   };
 }
