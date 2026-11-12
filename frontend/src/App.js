@@ -1,29 +1,49 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, lazy, Suspense, useMemo } from 'react';
 import SearchList from './components/SearchList';
 import LandingPage from './components/LandingPage';
 import LoginScreen from './components/LoginScreen';
+import SuperAdminLogin from './components/SuperAdminLogin';
+import AccountModal from './components/AccountModal';
 import ImportWizard from './components/ImportWizard';
 import { api } from './api';
+import { getMyProfile, recordAccessEvent } from './api/superadmin';
 import { isSupabaseConfigured, supabase } from './supabaseClient';
 import { useExtensionUpdates } from './providers/ExtensionUpdateProvider';
-import { AlertTriangle, BarChart3, Search, FolderOpen, MessageCircle, Upload, Download, ChevronLeft, Map as MapIcon, Target, X } from './components/Icons';
+import { isSuperAdmRoute, isSuperAdminEmail, isSuperAdminSession, normalizePathname } from './utils/superadmin';
+import {
+  AlertTriangle,
+  BarChart3,
+  Search,
+  FolderOpen,
+  MessageCircle,
+  Upload,
+  Download,
+  ChevronLeft,
+  Map as MapIcon,
+  Target,
+  X,
+  Shield,
+  KeyRound,
+  Ban,
+} from './components/Icons';
 
 // Abas pesadas carregadas sob demanda (code splitting): cada uma vira um chunk
 // separado, baixado só quando a aba é aberta pela primeira vez — em vez de tudo
 // no bundle inicial. ResultsTable arrasta o MapView junto no mesmo chunk.
-const Dashboard    = lazy(() => import('./components/Dashboard'));
-const ResultsTable = lazy(() => import('./components/ResultsTable'));
-const ScraperTab   = lazy(() => import('./components/ScraperTab'));
-const ProspectTab  = lazy(() => import('./components/ProspectTab'));
-const MapaTab      = lazy(() => import('./components/MapaTab'));
-const CampaignsTab = lazy(() => import('./components/CampaignsTab'));
-const UpdatesTab   = lazy(() => import('./components/UpdatesTab'));
+const Dashboard     = lazy(() => import('./components/Dashboard'));
+const ResultsTable  = lazy(() => import('./components/ResultsTable'));
+const ScraperTab    = lazy(() => import('./components/ScraperTab'));
+const ProspectTab   = lazy(() => import('./components/ProspectTab'));
+const MapaTab       = lazy(() => import('./components/MapaTab'));
+const CampaignsTab  = lazy(() => import('./components/CampaignsTab'));
+const UpdatesTab    = lazy(() => import('./components/UpdatesTab'));
+const SuperAdminTab = lazy(() => import('./components/SuperAdminTab'));
 
 function TabFallback() {
   return <p style={{ color: '#52525b', padding: '40px 0', textAlign: 'center', fontFamily: 'var(--font-mono)' }}>Carregando…</p>;
 }
 
-const NAV = [
+const BASE_NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   { id: 'scraper',   label: 'Buscar Leads', icon: Search },
   { id: 'searches',  label: 'Importações', icon: FolderOpen },
@@ -51,29 +71,45 @@ function TabPanel({ active, children }) {
   );
 }
 
-const VALID_TABS = new Set(NAV.map(item => item.id));
+const VALID_BASE_TABS = new Set(BASE_NAV.map(item => item.id));
 
 function initialTab() {
   if (typeof window === 'undefined') return 'dashboard';
+  if (isSuperAdmRoute(window.location.pathname)) return 'superadm';
   const requested = new URLSearchParams(window.location.search).get('tab');
-  return VALID_TABS.has(requested) ? requested : 'dashboard';
+  if (requested === 'superadm') return 'superadm';
+  return VALID_BASE_TABS.has(requested) ? requested : 'dashboard';
 }
 
 export default function App() {
   const { hasUpdate, isBlocking, latest, extension } = useExtensionUpdates();
-  const [session, setSession]       = useState(null);
+  const [session, setSession]         = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [tab, setTab]               = useState(initialTab);
+  const [profile, setProfile]         = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [superAdmRoute, setSuperAdmRoute] = useState(() => (typeof window !== 'undefined' ? isSuperAdmRoute(window.location.pathname) : false));
+  const [tab, setTab]                 = useState(initialTab);
   const [selectedSearch, setSelectedSearch] = useState(null);
-  const [uploading, setUploading]   = useState(false);
-  const [uploadMsg, setUploadMsg]   = useState('');
-  const [importOpen, setImportOpen] = useState(false);
-  const [loginOpen, setLoginOpen] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('login') === '1');
+  const [uploading, setUploading]     = useState(false);
+  const [uploadMsg, setUploadMsg]     = useState('');
+  const [importOpen, setImportOpen]   = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [loginOpen, setLoginOpen]     = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('login') === '1');
   const [dismissedUpdate, setDismissedUpdate] = useState(() => {
     try { return window.localStorage.getItem('fm-dismissed-update') || ''; } catch (_) { return ''; }
   });
 
-  // Sessão do Supabase: carrega a atual e escuta mudanças (login/logout).
+  // Normaliza /superadm/ para /superadm para manter caminhos relativos consistentes.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const normalized = normalizePathname(window.location.pathname);
+    if (normalized !== window.location.pathname) {
+      window.history.replaceState(window.history.state, '', `${normalized}${window.location.search}${window.location.hash}`);
+    }
+  }, []);
+
+  // Sessão do Supabase: carrega a atual e escuta mudanças (login/logout/recovery).
   useEffect(() => {
     if (!isSupabaseConfigured() || !supabase) {
       setAuthLoading(false);
@@ -84,20 +120,118 @@ export default function App() {
       setSession(data.session);
       setAuthLoading(false);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s);
+
+      if (event === 'PASSWORD_RECOVERY' && s) {
+        setRecoveryMode(true);
+        setAccountOpen(true);
+      }
+
+      if (event === 'SIGNED_IN' && s?.user?.id) {
+        const dedupeKey = `fm-logged-signin:${s.user.id}:${s.user.last_sign_in_at || 'active'}`;
+        let alreadyLogged = false;
+        try {
+          alreadyLogged = window.sessionStorage.getItem(dedupeKey) === '1';
+          if (!alreadyLogged) window.sessionStorage.setItem(dedupeKey, '1');
+        } catch (_) {}
+
+        if (!alreadyLogged) {
+          recordAccessEvent({
+            eventType: 'login_success',
+            loginContext: isSuperAdmRoute() ? 'superadm' : 'panel',
+            provider: s.user.app_metadata?.provider || 'email',
+          });
+        }
+      }
+    });
+
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Carrega perfil (role / status ativo) quando o usuário muda.
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setProfile(null);
+      setProfileLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setProfileLoading(true);
+    getMyProfile(session)
+      .then(({ data }) => {
+        if (!cancelled) setProfile(data);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          const email = session.user?.email || '';
+          setProfile({
+            id: session.user.id,
+            email,
+            full_name: session.user?.user_metadata?.full_name || '',
+            role: isSuperAdminEmail(email) ? 'superadmin' : 'user',
+            is_active: true,
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [session]);
+
+  const isSuperAdmin = useMemo(() => isSuperAdminSession(session, profile), [session, profile]);
+
+  const navItems = useMemo(() => {
+    if (!isSuperAdmin) return BASE_NAV;
+    return [...BASE_NAV, { id: 'superadm', label: 'Superadmin', icon: Shield }];
+  }, [isSuperAdmin]);
+
+  // Se não for superadmin e estiver tentando abrir a aba superadm, volta pro dashboard.
+  useEffect(() => {
+    if (!session || profileLoading) return;
+    if (tab === 'superadm' && !isSuperAdmin) {
+      setTab('dashboard');
+    } else if (superAdmRoute && isSuperAdmin && tab !== 'superadm') {
+      setTab('superadm');
+    }
+  }, [session, profileLoading, tab, isSuperAdmin, superAdmRoute]);
+
+  // Registra tentativa de usuário comum acessar /superadm já autenticado.
+  useEffect(() => {
+    if (!session || profileLoading || !superAdmRoute || isSuperAdmin) return;
+    recordAccessEvent({
+      eventType: 'blocked_login_attempt',
+      loginContext: 'superadm',
+      provider: session.user?.app_metadata?.provider || 'email',
+      metadata: { reason: 'non_superadmin_route_access' },
+    });
+  }, [session, profileLoading, superAdmRoute, isSuperAdmin]);
+
   // A aba faz parte da URL apenas quando autenticado, removendo ?login=1 ao entrar.
   useEffect(() => {
-    if (!session) return;
+    if (!session || profileLoading) return;
+    if (superAdmRoute && !isSuperAdmin) return;
     setLoginOpen(false);
+
     const url = new URL(window.location.href);
     url.searchParams.delete('login');
-    if (tab === 'dashboard') url.searchParams.delete('tab');
-    else url.searchParams.set('tab', tab);
+    if (tab === 'superadm') {
+      url.pathname = '/superadm';
+      url.searchParams.delete('tab');
+    } else {
+      if (isSuperAdmRoute(url.pathname)) {
+        url.pathname = '/';
+        setSuperAdmRoute(false);
+      }
+      if (tab === 'dashboard') url.searchParams.delete('tab');
+      else url.searchParams.set('tab', tab);
+    }
     window.history.replaceState({ tab }, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [tab, session]);
+  }, [tab, session, profileLoading, superAdmRoute, isSuperAdmin]);
 
   function closeLoginModal() {
     setLoginOpen(false);
@@ -108,8 +242,21 @@ export default function App() {
     }
   }
 
+  function navigateToPanel() {
+    const url = new URL(window.location.href);
+    url.pathname = '/';
+    url.searchParams.delete('tab');
+    url.searchParams.delete('login');
+    window.history.replaceState({ tab: 'dashboard' }, '', `${url.pathname}${url.search}${url.hash}`);
+    setSuperAdmRoute(false);
+    setTab('dashboard');
+  }
+
   useEffect(() => {
-    const onPopState = () => setTab(initialTab());
+    const onPopState = () => {
+      setSuperAdmRoute(isSuperAdmRoute(window.location.pathname));
+      setTab(initialTab());
+    };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
@@ -121,9 +268,16 @@ export default function App() {
 
   async function handleLogout() {
     if (!supabase) return;
+    await recordAccessEvent({
+      eventType: 'logout',
+      loginContext: superAdmRoute ? 'superadm' : 'panel',
+      provider: session?.user?.app_metadata?.provider || 'email',
+    }).catch(() => {});
     await supabase.auth.signOut();
     setSelectedSearch(null);
-    setTab('dashboard');
+    setAccountOpen(false);
+    setRecoveryMode(false);
+    setTab(superAdmRoute ? 'superadm' : 'dashboard');
     setLoginOpen(false);
   }
 
@@ -146,7 +300,7 @@ export default function App() {
   }
 
   // ── Estados de autenticação ────────────────────────────────────────────────
-  if (authLoading) {
+  if (authLoading || (session && profileLoading && !profile)) {
     return (
       <div style={{ minHeight: '100vh', background: '#09090b', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a1a1aa' }}>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -154,7 +308,11 @@ export default function App() {
       </div>
     );
   }
+
   if (!session) {
+    if (superAdmRoute) {
+      return <SuperAdminLogin onBackToPanel={navigateToPanel} />;
+    }
     return (
       <>
         <LandingPage onOpenLogin={() => setLoginOpen(true)} />
@@ -164,6 +322,65 @@ export default function App() {
   }
 
   const userEmail = session.user?.email || '';
+
+  // Conta bloqueada pelo administrador
+  if (profile && profile.is_active === false && !isSuperAdminEmail(userEmail)) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#09090b', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div style={{ maxWidth: 440, width: '100%', background: '#18181b', border: '1px solid rgba(239,68,68,0.4)', padding: 28, textAlign: 'center' }}>
+          <Ban size={32} color="#ef4444" style={{ marginBottom: 14 }} />
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: '#fafafa', margin: '0 0 8px' }}>Acesso suspenso</h1>
+          <p style={{ fontSize: 13, color: '#a1a1aa', lineHeight: 1.6, margin: '0 0 14px' }}>
+            A conta <strong style={{ color: '#fafafa' }}>{userEmail}</strong> foi desativada pelo administrador.
+          </p>
+          {profile.blocked_reason && (
+            <div style={{ background: '#09090b', border: '1px solid #27272a', padding: '10px 12px', fontSize: 12, color: '#fca5a5', marginBottom: 18 }}>
+              Motivo: {profile.blocked_reason}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={handleLogout}
+            style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '10px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+          >
+            Sair desta conta
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Usuário normal tentando acessar /superadm diretamente
+  if (superAdmRoute && !isSuperAdmin) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#09090b', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div style={{ maxWidth: 440, width: '100%', background: '#18181b', border: '1px solid #27272a', borderTop: '3px solid #ef4444', padding: 28, textAlign: 'center' }}>
+          <Shield size={32} color="#ef4444" style={{ marginBottom: 14 }} />
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: '#fafafa', margin: '0 0 8px' }}>Área restrita ao Superadmin</h1>
+          <p style={{ fontSize: 13, color: '#a1a1aa', lineHeight: 1.6, margin: '0 0 20px' }}>
+            Você está conectado como <strong style={{ color: '#fafafa' }}>{userEmail}</strong>, que não possui permissão para o console <code className="mono">/superadm</code>.
+          </p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={navigateToPanel}
+              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+            >
+              Ir para meu Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{ background: 'transparent', color: '#a1a1aa', border: '1px solid #27272a', padding: '10px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+            >
+              Trocar de conta
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const showUpdateBanner = hasUpdate && (isBlocking || dismissedUpdate !== latest?.version);
 
   function dismissUpdate() {
@@ -191,15 +408,15 @@ export default function App() {
 
         {/* Nav */}
         <nav style={{ display: 'flex', gap: 4 }}>
-          {NAV.map(n => (
+          {navItems.map(n => (
             <button key={n.id} onClick={() => setTab(n.id)} className="nav-btn"
               aria-current={tab === n.id ? 'page' : undefined}
               style={{
                 background: tab === n.id ? 'rgba(16,185,129,0.15)' : 'transparent',
                 color: tab === n.id ? '#10b981' : '#a1a1aa',
                 border: tab === n.id ? '1px solid rgba(16,185,129,0.3)' : '1px solid transparent',
-                padding: '7px 16px', borderRadius: 0, cursor: 'pointer', fontSize: 13, fontWeight: 500, transition: 'all 0.2s',
-                display: 'flex', alignItems: 'center', gap: 8
+                padding: '7px 14px', borderRadius: 0, cursor: 'pointer', fontSize: 13, fontWeight: 500, transition: 'all 0.2s',
+                display: 'flex', alignItems: 'center', gap: 7
               }}>
               <n.icon size={15} color={tab === n.id ? '#10b981' : '#a1a1aa'} />
               <span>{n.label}</span>
@@ -219,12 +436,21 @@ export default function App() {
           <button
             onClick={() => setImportOpen(true)}
             disabled={uploading}
-            style={{ background: 'linear-gradient(135deg,#10b981,#06b6d4)', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 0, cursor: uploading ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, opacity: uploading ? 0.7 : 1, transition: 'opacity 0.2s' }}>
+            style={{ background: 'linear-gradient(135deg,#10b981,#06b6d4)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 0, cursor: uploading ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, opacity: uploading ? 0.7 : 1, transition: 'opacity 0.2s' }}>
             {uploading ? <><Spinner /> Importando...</> : <><Upload size={14} /> Importar planilha</>}
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 6, borderLeft: '1px solid #27272a' }}>
-            <span title={userEmail} style={{ fontSize: 12, color: '#a1a1aa', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userEmail}</span>
+            <span title={userEmail} style={{ fontSize: 12, color: '#a1a1aa', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userEmail}</span>
             <button
+              type="button"
+              onClick={() => { setRecoveryMode(false); setAccountOpen(true); }}
+              title="Minha conta e alterar senha"
+              style={{ background: 'transparent', color: '#a1a1aa', border: '1px solid #27272a', padding: '7px 10px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 500, flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <KeyRound size={13} />
+              <span>Senha</span>
+            </button>
+            <button
+              type="button"
               onClick={handleLogout}
               title="Sair"
               style={{ background: 'transparent', color: '#a1a1aa', border: '1px solid #27272a', padding: '7px 12px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 500, flexShrink: 0 }}>
@@ -275,6 +501,11 @@ export default function App() {
         {/* Updates tab */}
         <TabPanel active={tab === 'updates'}><UpdatesTab /></TabPanel>
 
+        {/* Superadmin tab (somente laiobomfimdev@gmail.com) */}
+        {isSuperAdmin && (
+          <TabPanel active={tab === 'superadm'}><SuperAdminTab /></TabPanel>
+        )}
+
         {/* Searches tab */}
         <TabPanel active={tab === 'searches'}>
           <div className="responsive-grid-searches" style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 24, alignItems: 'start' }}>
@@ -322,6 +553,14 @@ export default function App() {
       </footer>
 
       <ImportWizard open={importOpen} onClose={() => setImportOpen(false)} onImport={handleWizardImport} />
+      <AccountModal
+        open={accountOpen}
+        onClose={() => { setAccountOpen(false); setRecoveryMode(false); }}
+        session={session}
+        profile={profile}
+        recoveryMode={recoveryMode}
+        onProfileUpdated={(updated) => setProfile((prev) => ({ ...(prev || {}), ...(updated || {}) }))}
+      />
     </div>
   );
 }

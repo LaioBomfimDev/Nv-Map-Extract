@@ -3,5 +3,12 @@
   "installCommand": "cd frontend && npm ci",
   "buildCommand": "cd frontend && npm run build",
   "outputDirectory": "frontend/build",
-  "framework": "create-react-app"
+  "framework": "create-react-app",
+  "redirects": [
+    { "source": "/superadm/", "destination": "/superadm", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/superadm", "destination": "/index.html" },
+    { "source": "/superadm/:path*", "destination": "/index.html" }
+  ]
 }

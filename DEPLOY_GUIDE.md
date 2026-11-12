@@ -27,7 +27,12 @@ Configure na Vercel:
 ```text
 REACT_APP_SUPABASE_URL=https://SEU-PROJETO.supabase.co
 REACT_APP_SUPABASE_ANON_KEY=SUA_CHAVE_ANON_PUBLIC
+SUPABASE_SERVICE_ROLE_KEY=SUA_CHAVE_SERVICE_ROLE (opcional, apenas para criar/excluir/redefinir senha no /superadm)
 ```
+
+> **Importante:** nunca use o prefixo `REACT_APP_` na `SUPABASE_SERVICE_ROLE_KEY`. Ela fica apenas no servidor (Vercel Serverless Functions em `api/`).
+
+Para habilitar o console `/superadm` e logs de acesso, execute também `supabase/migration_superadmin.sql` no SQL Editor do Supabase.
 
 Depois de alterar variaveis, faca um redeploy.
 
